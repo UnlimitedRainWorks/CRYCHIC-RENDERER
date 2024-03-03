@@ -4,14 +4,24 @@
 #include "Common/MathHelper.h"
 #include "Common/UploadBuffer.h"
 
-struct ObjectConstants
+//struct ObjectConstants
+//{
+//    DirectX::XMFLOAT4X4 World = MathHelper::Identity4x4();
+//	DirectX::XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
+//	UINT     MaterialIndex;
+//	UINT     ObjPad0;
+//	UINT     ObjPad1;
+//	UINT     ObjPad2;
+//};
+
+struct InstanceData
 {
     DirectX::XMFLOAT4X4 World = MathHelper::Identity4x4();
-	DirectX::XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
-	UINT     MaterialIndex;
-	UINT     ObjPad0;
-	UINT     ObjPad1;
-	UINT     ObjPad2;
+    DirectX::XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
+    UINT MaterialIndex;
+    UINT InstancePad0;
+    UINT InstancePad1;
+    UINT InstancePad2;
 };
 
 struct PassConstants
@@ -80,9 +90,12 @@ public:
     // We cannot update a cbuffer until the GPU is done processing the commands
     // that reference it.  So each frame needs their own cbuffers.
     std::unique_ptr<UploadBuffer<PassConstants>> PassCB = nullptr;
-    std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
+    
+    //std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
 
 	std::unique_ptr<UploadBuffer<MaterialData>> MaterialBuffer = nullptr;
+
+	std::unique_ptr<UploadBuffer<InstanceData>> InstanceBuffer = nullptr;
 
     // Fence value to mark commands up to this fence point.  This lets us
     // check if these frame resources are still in use by the GPU.

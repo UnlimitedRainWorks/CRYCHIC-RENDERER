@@ -49,6 +49,8 @@ struct RenderItem
 	UINT IndexCount = 0;
 	UINT StartIndexLocation = 0;
 	int BaseVertexLocation = 0;
+	UINT InstanceCount = 0;
+	std::vector<InstanceData> Instances;
 };
 
 class CRYCHIC : public D3DApp 
@@ -73,7 +75,8 @@ private:
 
 	void OnKeyboardInput(const GameTimer& gt);
 	void AnimateMaterials(const GameTimer& gt);
-	void UpdateObjectCBs(const GameTimer& gt);
+	//void UpdateObjectCBs(const GameTimer& gt);
+	void UpdateInstanceData(const GameTimer& gt);
 	void UpdateMaterialBuffer(const GameTimer& gt);
 	void UpdateMainPassCB(const GameTimer& gt);
 
@@ -93,6 +96,7 @@ private:
 
 private:
 
+	//  «∑Òø™∆Ù—”≥Ÿ‰÷»æ
 	bool isDeferred = true;
 
 	std::vector<std::unique_ptr<FrameResource>> mFrameResources;
@@ -120,6 +124,7 @@ private:
 	// Render items divided by PSO.
 	std::vector<RenderItem*> mOpaqueRitems;
 
+	UINT mInstanceCount = 0;
 	UINT mTexsHeapIndex = 0;
 	UINT gBufferHeapIndex = 0;
 	std::unique_ptr<DeferredRenderTarget> mDeferred = nullptr;

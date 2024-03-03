@@ -120,7 +120,7 @@ void CRYCHIC::Update(const GameTimer& gt)
 	}
 
 	AnimateMaterials(gt);
-	UpdateObjectCBs(gt);
+	UpdateInstanceData(gt);
 	UpdateMaterialBuffer(gt);
 	UpdateMainPassCB(gt);
 }
@@ -329,29 +329,60 @@ void CRYCHIC::AnimateMaterials(const GameTimer& gt)
 
 }
 
-void CRYCHIC::UpdateObjectCBs(const GameTimer& gt)
+//void CRYCHIC::UpdateObjectCBs(const GameTimer& gt)
+//{
+//	auto currObjectCB = mCurrFrameResource->ObjectCB.get();
+//	for (auto& e : mAllRitems)
+//	{
+//		// Only update the cbuffer data if the constants have changed.  
+//		// This needs to be tracked per frame resource.
+//		if (e->NumFramesDirty > 0)
+//		{
+//			XMMATRIX world = XMLoadFloat4x4(&e->World);
+//			XMMATRIX texTransform = XMLoadFloat4x4(&e->TexTransform);
+//
+//			ObjectConstants objConstants;
+//			XMStoreFloat4x4(&objConstants.World, XMMatrixTranspose(world));
+//			XMStoreFloat4x4(&objConstants.TexTransform, XMMatrixTranspose(texTransform));
+//			objConstants.MaterialIndex = e->Mat->MatCBIndex;
+//
+//			currObjectCB->CopyData(e->ObjCBIndex, objConstants);
+//
+//			// Next FrameResource need to be updated too.
+//			e->NumFramesDirty--;
+//		}
+//	}
+//}
+
+void CRYCHIC::UpdateInstanceData(const GameTimer& gt)
 {
-	auto currObjectCB = mCurrFrameResource->ObjectCB.get();
+	auto currInstanceBuffer = mCurrFrameResource->InstanceBuffer.get();
 	for (auto& e : mAllRitems)
 	{
-		// Only update the cbuffer data if the constants have changed.  
-		// This needs to be tracked per frame resource.
-		if (e->NumFramesDirty > 0)
+		const auto& instanceData = e->Instances;
+		int instanceCount = 0;
+		for (UINT i = 0; i < (UINT)instanceData.size(); ++i)
 		{
-			XMMATRIX world = XMLoadFloat4x4(&e->World);
-			XMMATRIX texTransform = XMLoadFloat4x4(&e->TexTransform);
+			XMMATRIX world = XMLoadFloat4x4(&instanceData[i].World);
+			XMMATRIX texTransform = XMLoadFloat4x4(&instanceData[i].TexTransform);
 
-			ObjectConstants objConstants;
-			XMStoreFloat4x4(&objConstants.World, XMMatrixTranspose(world));
-			XMStoreFloat4x4(&objConstants.TexTransform, XMMatrixTranspose(texTransform));
-			objConstants.MaterialIndex = e->Mat->MatCBIndex;
+			InstanceData data;
+			XMStoreFloat4x4(&data.World, XMMatrixTranspose(world));
+			XMStoreFloat4x4(&data.TexTransform, XMMatrixTranspose(texTransform));
+			data.MaterialIndex = instanceData[i].MaterialIndex;
 
-			currObjectCB->CopyData(e->ObjCBIndex, objConstants);
-
-			// Next FrameResource need to be updated too.
-			e->NumFramesDirty--;
+			currInstanceBuffer->CopyData(instanceCount++, data);
 		}
+		e->InstanceCount = instanceCount;
+
+		std::wostringstream outs;
+		outs.precision(6);
+		outs << L"Instancing and Culling Demo" <<
+			L"    " << e->InstanceCount <<
+			L" objects visible out of " << e->Instances.size();
+		mMainWndCaption = outs.str();
 	}
+
 }
 
 void CRYCHIC::UpdateMaterialBuffer(const GameTimer& gt)
@@ -464,12 +495,17 @@ void CRYCHIC::BuildRootSignature()
 	CD3DX12_ROOT_PARAMETER slotRootParameter[5];
 
 	// Perfomance TIP: Order from most frequent to least frequent.
-	slotRootParameter[0].InitAsConstantBufferView(0);
-	slotRootParameter[1].InitAsConstantBufferView(1);
-	slotRootParameter[2].InitAsShaderResourceView(0, 1);
+	
+	// instanceData srv root descriptor
+	slotRootParameter[0].InitAsShaderResourceView(0, 1);
+	// passCB cbv root descriptor
+	slotRootParameter[1].InitAsConstantBufferView(0);
+	// material srv root descriptor
+	slotRootParameter[2].InitAsShaderResourceView(1, 1);
+	// bind all the textures descriptor table
 	slotRootParameter[3].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
+	// bind gbuffers descriptor table
 	slotRootParameter[4].InitAsDescriptorTable(1, &gBufferTable, D3D12_SHADER_VISIBILITY_PIXEL);
-
 
 	auto staticSamplers = GetStaticSamplers();
 
@@ -786,7 +822,7 @@ void CRYCHIC::BuildFrameResources()
 	for (int i = 0; i < gNumFrameResources; ++i)
 	{
 		mFrameResources.push_back(std::make_unique<FrameResource>(md3dDevice.Get(),
-			1, (UINT)mAllRitems.size(), (UINT)mMaterials.size()));
+			1, mInstanceCount, (UINT)mMaterials.size()));
 	}
 }
 
@@ -833,18 +869,48 @@ void CRYCHIC::BuildMaterials()
 void CRYCHIC::BuildRenderItems()
 {
 	auto boxRitem = std::make_unique<RenderItem>();
-	XMStoreFloat4x4(&boxRitem->World, XMMatrixScaling(2.0f, 2.0f, 2.0f) * XMMatrixTranslation(0.0f, 1.0f, 0.0f));
+	XMStoreFloat4x4(&boxRitem->World, XMMatrixScaling(1.0f, 1.0f, 1.0f));
 	XMStoreFloat4x4(&boxRitem->TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
 	boxRitem->ObjCBIndex = 0;
 	boxRitem->Mat = mMaterials["crate0"].get();
 	boxRitem->Geo = mGeometries["shapeGeo"].get();
 	boxRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	boxRitem->InstanceCount = 0;
 	boxRitem->IndexCount = boxRitem->Geo->DrawArgs["box"].IndexCount;
 	boxRitem->StartIndexLocation = boxRitem->Geo->DrawArgs["box"].StartIndexLocation;
 	boxRitem->BaseVertexLocation = boxRitem->Geo->DrawArgs["box"].BaseVertexLocation;
+
+	const int n = 5;
+	mInstanceCount = n * n * n;
+	boxRitem->Instances.resize(mInstanceCount);
+	float width = 200.0f;
+	float height = 200.0f;
+	float depth = 200.0f;
+
+	float x = -0.5f * width;
+	float y = -0.5f * height;
+	float z = -0.5f * depth;
+	float dx = width / (n - 1);
+	float dy = height / (n - 1);
+	float dz = depth / (n - 1);
+	for (size_t i = 0; i < n; i++)
+	{
+		for (size_t j = 0; j < n; j++) 
+		{
+			for (size_t k = 0; k < n; k++) 
+			{
+				int index = i * n * n + j * n + k;
+				XMStoreFloat4x4(&boxRitem->Instances[index].World, XMMatrixTranslation(x + k * dx,
+					y + j * dy, z + i * dz));
+				XMStoreFloat4x4(&boxRitem->Instances[index].TexTransform, XMMatrixScaling(2.0f, 1.0f, 2.0f));
+				boxRitem->Instances[index].MaterialIndex = index % mMaterials.size();
+			}
+		}
+	}
+
 	mAllRitems.push_back(std::move(boxRitem));
 
-	auto gridRitem = std::make_unique<RenderItem>();
+	/*auto gridRitem = std::make_unique<RenderItem>();
 	gridRitem->World = MathHelper::Identity4x4();
 	XMStoreFloat4x4(&gridRitem->TexTransform, XMMatrixScaling(8.0f, 8.0f, 1.0f));
 	gridRitem->ObjCBIndex = 1;
@@ -915,7 +981,7 @@ void CRYCHIC::BuildRenderItems()
 		mAllRitems.push_back(std::move(rightCylRitem));
 		mAllRitems.push_back(std::move(leftSphereRitem));
 		mAllRitems.push_back(std::move(rightSphereRitem));
-	}
+	}*/
 
 	// All the render items are opaque.
 	for (auto& e : mAllRitems)
@@ -924,10 +990,6 @@ void CRYCHIC::BuildRenderItems()
 
 void CRYCHIC::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems)
 {
-	UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-
-	auto objectCB = mCurrFrameResource->ObjectCB->Resource();
-
 	// For each render item...
 	for (size_t i = 0; i < ritems.size(); ++i)
 	{
@@ -937,14 +999,10 @@ void CRYCHIC::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vec
 		cmdList->IASetIndexBuffer(&ri->Geo->IndexBufferView());
 		cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
 
-		D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
-
-		// CD3DX12_GPU_DESCRIPTOR_HANDLE tex(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-		// tex.Offset(ri->Mat->DiffuseSrvHeapIndex, mCbvSrvDescriptorSize);
-
-		cmdList->SetGraphicsRootConstantBufferView(0, objCBAddress);
-
-		cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
+		// Set instance buffer used by the render item. 
+		auto instanceBuffer = mCurrFrameResource->InstanceBuffer->Resource();
+		mCommandList->SetGraphicsRootShaderResourceView(0, instanceBuffer->GetGPUVirtualAddress());
+		cmdList->DrawIndexedInstanced(ri->IndexCount, ri->InstanceCount, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
 	}
 }
 

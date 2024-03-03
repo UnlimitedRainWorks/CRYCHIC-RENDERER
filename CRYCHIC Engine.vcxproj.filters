@@ -39,11 +39,11 @@
     <ClCompile Include="CRYCHIC.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="FrameResource.cpp">
-      <Filter>头文件</Filter>
-    </ClCompile>
     <ClCompile Include="DeferredRenderTarget.cpp">
-      <Filter>头文件</Filter>
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="FrameResource.cpp">
+      <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -18,12 +18,23 @@ struct VertexOutGBuffer
     float3 PosW    : POSITION;
     float3 NormalW : NORMAL;
 	float2 TexC    : TEXCOORD0;
+    // 该索引指向的都是未经插值的三角形
+    nointerpolation uint MatIndex : MATINDEX;
 };
 
 // GBuffer
-VertexOutGBuffer GBufferVS(VertexInGBuffer vin)
+VertexOutGBuffer GBufferVS(VertexInGBuffer vin, uint instanceID : SV_InstanceID)
 {
-    VertexOutGBuffer vout;
+    VertexOutGBuffer vout = (VertexOutGBuffer)0.0f;
+
+    // Fetch the instance data.
+    InstanceData instanceData = gInstanceData[instanceID];
+    float4x4 gWorld = instanceData.World;
+    float4x4 gTexTransform = instanceData.TexTransform;
+    uint gMaterialIndex = instanceData.MaterialIndex;
+
+    vout.MatIndex = gMaterialIndex;
+
     // Fetch the material data.
 	MaterialData matData = gMaterialData[gMaterialIndex];
 	
@@ -53,7 +64,7 @@ GBuffer GBufferPS(VertexOutGBuffer pin)
     float metalness = 0.3f;
     
     // Fetch the material data.
-	MaterialData matData = gMaterialData[gMaterialIndex];
+	MaterialData matData = gMaterialData[pin.MatIndex];
 	float4 diffuseAlbedo = matData.DiffuseAlbedo;
 	float3 fresnelR0 = matData.FresnelR0;
 	float  roughness = matData.Roughness;
@@ -64,15 +75,3 @@ GBuffer GBufferPS(VertexOutGBuffer pin)
 
     return EncodePBRToGBuffer(posW, metalness, diffuseAlbedo.xyz, normalW, roughness);
 }
-
-//GBuffer GBufferPS(VertexOutGBuffer pin)
-//{
-//    //GBuffer EncodePBRToGBuffer(float3 pos,float metalness, 
-//						   //float3 albedo, float3 normal, float roughness)
-//    GBuffer gout;
-//    gout.GBuffer0 = float4(1.0f, 1.0f, 1.0f, 1.0f);
-//    gout.GBuffer1 = float4(1.0f, 1.0f, 1.0f, 1.0f);
-//    gout.GBuffer2 = float4(1.0f, 1.0f, 1.0f, 1.0f);
-//    gout.GBuffer3 = float4(1.0f, 1.0f, 1.0f, 1.0f);
-//    return gout;
-//}

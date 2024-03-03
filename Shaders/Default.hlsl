@@ -16,7 +16,6 @@
 #endif
 
 #include "Common.hlsl"
-
 struct VertexIn
 {
 	float3 PosL    : POSITION;
@@ -30,12 +29,22 @@ struct VertexOut
     float3 PosW    : POSITION;
     float3 NormalW : NORMAL;
 	float2 TexC    : TEXCOORD;
+
+    // 该索引指向的都是未经插值的三角形
+    nointerpolation uint MatIndex : MATINDEX;
 };
 
-VertexOut VS(VertexIn vin)
+VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
 {
 	VertexOut vout = (VertexOut)0.0f;
 
+    // Get instanceData.
+    InstanceData instanceData = gInstanceData[instanceID];
+    float4x4 gWorld = instanceData.World;
+    float4x4 gTexTransform = instanceData.TexTransform;
+    uint gMaterialIndex = instanceData.MaterialIndex;
+
+    vout.MatIndex = gMaterialIndex;
 	// Fetch the material data.
 	MaterialData matData = gMaterialData[gMaterialIndex];
 	
@@ -52,14 +61,14 @@ VertexOut VS(VertexIn vin)
 	// Output vertex attributes for interpolation across triangle.
 	float4 texC = mul(float4(vin.TexC, 0.0f, 1.0f), gTexTransform);
 	vout.TexC = mul(texC, matData.MatTransform).xy;
-	
+
     return vout;
 }
 
 float4 PS(VertexOut pin) : SV_Target
 {
 	// Fetch the material data.
-	MaterialData matData = gMaterialData[gMaterialIndex];
+	MaterialData matData = gMaterialData[pin.MatIndex];
 	float4 diffuseAlbedo = matData.DiffuseAlbedo;
 	float3 fresnelR0 = matData.FresnelR0;
 	float  roughness = matData.Roughness;

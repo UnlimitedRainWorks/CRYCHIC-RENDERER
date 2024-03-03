@@ -28,9 +28,11 @@ struct VertexOutDeferred
 };
 
 // 根据GBuffer进行延迟渲染
-VertexOutDeferred DeferredVS(VertexInDeferred vin)
+VertexOutDeferred DeferredVS(VertexInDeferred vin, uint instanceID : SV_InstanceID)
 {
     VertexOutDeferred vout;
+    InstanceData instanceData = gInstanceData[instanceID];
+    float4x4 gWorld = instanceData.World;
     float4 posW = mul(float4(vin.PosL, 1.0), gWorld);
     vout.PosH = mul(posW, gViewProj);
     return vout;
