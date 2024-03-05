@@ -37,7 +37,7 @@ struct RenderItem
 	int NumFramesDirty = gNumFrameResources;
 
 	// Index into GPU constant buffer corresponding to the ObjectCB for this render item.
-	UINT ObjCBIndex = -1;
+	//UINT ObjCBIndex = -1;
 
 	Material* Mat = nullptr;
 	MeshGeometry* Geo = nullptr;
@@ -51,6 +51,8 @@ struct RenderItem
 	int BaseVertexLocation = 0;
 	UINT InstanceCount = 0;
 	std::vector<InstanceData> Instances;
+	BoundingBox Bounds;
+	UINT itemIndex = 0;
 };
 
 class CRYCHIC : public D3DApp 
@@ -85,13 +87,14 @@ private:
 	void BuildDescriptorHeaps();
 	void BuildShadersAndInputLayout();
 	void BuildShapeGeometry();
+	void BuildGeometry(std::string fileName);
 	void BuildPSOs();
 	void BuildFrameResources();
 	void BuildMaterials();
 	void BuildRenderItems();
+	void BuildInstancingSceneRenderItems();
 	void DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems);
 	void DrawGBuffer();
-
 	std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GetStaticSamplers();
 
 private:
@@ -99,6 +102,8 @@ private:
 	//  «∑Òø™∆Ù—”≥Ÿ‰÷»æ
 	bool isDeferred = true;
 
+	UINT mTexSize = 0;
+	UINT mGBufferSize = 4;
 	std::vector<std::unique_ptr<FrameResource>> mFrameResources;
 	FrameResource* mCurrFrameResource = nullptr;
 	int mCurrFrameResourceIndex = 0;
@@ -129,9 +134,21 @@ private:
 	UINT gBufferHeapIndex = 0;
 	std::unique_ptr<DeferredRenderTarget> mDeferred = nullptr;
 
+	BoundingFrustum mCamFrustum;
+
+	bool mFrustumCullingEnabled = true;
+
 	PassConstants mMainPassCB;
 
 	Camera mCamera;
 
 	POINT mLastMousePos;
+
+
+	XMFLOAT3 mEyePos = { 0.0f, 0.0f, 0.0f };
+	float mTheta = 1.5f * XM_PI;
+	float mPhi = 0.2f * XM_PI;
+	float mRadius = 15.0f;
+
+	std::vector<std::string> texNames;
 };
