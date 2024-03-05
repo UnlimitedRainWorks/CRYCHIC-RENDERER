@@ -2,19 +2,6 @@
 // Default.hlsl by Frank Luna (C) 2015 All Rights Reserved.
 //***************************************************************************************
 
-// Defaults for number of lights.
-#ifndef NUM_DIR_LIGHTS
-    #define NUM_DIR_LIGHTS 3
-#endif
-
-#ifndef NUM_POINT_LIGHTS
-    #define NUM_POINT_LIGHTS 0
-#endif
-
-#ifndef NUM_SPOT_LIGHTS
-    #define NUM_SPOT_LIGHTS 0
-#endif
-
 #include "Common.hlsl"
 
 struct VertexInDeferred
@@ -54,13 +41,15 @@ float4 DeferredPS(VertexOutDeferred pin) : SV_Target
     float3 normalW = pbrDesc.normal;
     float3 toEyeW = normalize(gEyePosW - posW);
     float4 ambient = gAmbientLight * float4(albedo, 1.0);
-    const float shininess = 1.0f - roughness;
-    float3 fresnelR0 = lerp(0.04, albedo, metalness);
-    Material mat = { float4(albedo, 1.0), fresnelR0, shininess};
+    //float3 fresnelR0 = lerp(0.04, albedo, metalness);
+    Material1 mat;
+    mat.DiffuseAlbedo = albedo;
+    mat.Roughness = roughness;
+    mat.Metalness = metalness;
+    //= { albedo, roughness, metalness};
     float3 shadowFactor = 1.0f;
-    float4 directLight = 0.0f;
-    directLight = PBRShading(gLights, mat, normalW, toEyeW);
-    float4  litColor = ambient + directLight;
+    float4 directLight = PBRShading(gLights, mat, normalW, toEyeW, posW);
+    float4 litColor = ambient + directLight;
     litColor.a = 1.0;
     return litColor;
 }

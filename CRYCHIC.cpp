@@ -49,16 +49,7 @@ bool CRYCHIC::Initialize()
 	mDeferred = std::make_unique<DeferredRenderTarget>(md3dDevice.Get(),
 		mClientWidth, mClientHeight, DXGI_FORMAT_R32G32B32A32_FLOAT);
 
-	// Convert Spherical to Cartesian coordinates.
-	//mEyePos.x = mRadius * sinf(mPhi) * cosf(mTheta);
-	//mEyePos.z = mRadius * sinf(mPhi) * sinf(mTheta);
-	//mEyePos.y = mRadius * cosf(mPhi);
-
-	// Build the view matrix.
-	//XMVECTOR pos = XMVectorSet(mEyePos.x, mEyePos.y, mEyePos.z, 1.0f);
-
 	mCamera.SetPosition(0.0f, 2.0f, -15.0f);
-	//mCamera.SetPosition(mEyePos.x, mEyePos.y, mEyePos.z);
 
 	LoadTextures();
 	BuildRootSignature();
@@ -109,7 +100,7 @@ void CRYCHIC::CreateRtvAndDsvDescriptorHeaps()
 void CRYCHIC::OnResize()
 {
 	D3DApp::OnResize();
-
+	//mDeferred->OnResize(mClientWidth, mClientHeight);
 	mCamera.SetLens(0.25f * MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
 
 	BoundingFrustum::CreateFromMatrix(mCamFrustum, mCamera.GetProj());
@@ -149,7 +140,7 @@ void CRYCHIC::Draw(const GameTimer& gt)
 		// We can only reset when the associated command lists have finished execution on the GPU.
 		ThrowIfFailed(cmdListAlloc->Reset());
 
-		// 第一个 pass 生成 GBuffer
+		// Geometry pass
 		ThrowIfFailed(mCommandList->Reset(cmdListAlloc.Get(), mPSOs["gBuffer"].Get()));
 
 		ID3D12DescriptorHeap* descriptorHeaps[] = { mSrvDescriptorHeap.Get() };
@@ -193,7 +184,10 @@ void CRYCHIC::Draw(const GameTimer& gt)
 
 		mCommandList->SetGraphicsRootDescriptorTable(4, mDeferred->gBuffer0Srv());
 
-		DrawRenderItems(mCommandList.Get(), mOpaqueRitems);
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[int(RenderLayer::Opaque)]);
+
+		mCommandList->SetPipelineState(mPSOs["sky"].Get());
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[int(RenderLayer::Sky)]);
 
 		// Indicate a state transition on the resource usage.
 		mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
@@ -262,7 +256,10 @@ void CRYCHIC::Draw(const GameTimer& gt)
 		// The root signature knows how many descriptors are expected in the table.
 		mCommandList->SetGraphicsRootDescriptorTable(3, mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
-		DrawRenderItems(mCommandList.Get(), mOpaqueRitems);
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[int(RenderLayer::Opaque)]);
+
+		mCommandList->SetPipelineState(mPSOs["sky"].Get());
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[int(RenderLayer::Sky)]);
 
 		// Indicate a state transition on the resource usage.
 		mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
@@ -432,6 +429,7 @@ void CRYCHIC::UpdateMaterialBuffer(const GameTimer& gt)
 			matData.DiffuseAlbedo = mat->DiffuseAlbedo;
 			matData.FresnelR0 = mat->FresnelR0;
 			matData.Roughness = mat->Roughness;
+			matData.Metalness = mat->Metalness;
 			XMStoreFloat4x4(&matData.MatTransform, XMMatrixTranspose(matTransform));
 			matData.DiffuseMapIndex = mat->DiffuseSrvHeapIndex;
 
@@ -467,12 +465,88 @@ void CRYCHIC::UpdateMainPassCB(const GameTimer& gt)
 	mMainPassCB.TotalTime = gt.TotalTime();
 	mMainPassCB.DeltaTime = gt.DeltaTime();
 	mMainPassCB.AmbientLight = { 0.25f, 0.25f, 0.35f, 1.0f };
+
+	int dirLightsNum = 0;
+	int pointLightsNum = 5;
+	int spotLightsNum = 5;
+	// Directional Lights
 	mMainPassCB.Lights[0].Direction = { 0.57735f, -0.57735f, 0.57735f };
-	mMainPassCB.Lights[0].Strength = { 4.8f, 4.8f, 4.8f };
+	mMainPassCB.Lights[0].Strength = { 2.8f, 2.8f, 2.8f };
 	mMainPassCB.Lights[1].Direction = { -0.57735f, -0.57735f, 0.57735f };
 	mMainPassCB.Lights[1].Strength = { 0.4f, 0.4f, 0.4f };
 	mMainPassCB.Lights[2].Direction = { 0.0f, -0.707f, -0.707f };
 	mMainPassCB.Lights[2].Strength = { 0.2f, 0.2f, 0.2f };
+
+	// Point Lights
+	for (int i = dirLightsNum, j = 0; i < dirLightsNum + pointLightsNum; i++,j++)
+	{
+		mMainPassCB.Lights[i].Position = { -5.0f, 4.5f, -10.0f + j * 5.0f};
+		mMainPassCB.Lights[i].Strength = { 5.2f, 3.0f, 5.1f };
+		mMainPassCB.Lights[i].FalloffStart = 1.0f;
+		mMainPassCB.Lights[i].FalloffEnd = 8.0f;
+	}
+
+	// Spot Lights
+	for (int i = dirLightsNum + pointLightsNum, j = 0; i < dirLightsNum + pointLightsNum + spotLightsNum; i++, j++)
+	{
+		mMainPassCB.Lights[i].Position = { 5.0f, 4.5f, -10.0f + j * 5.0f };
+		mMainPassCB.Lights[i].Direction = { 0.0f, -1.0f, 0.0f };
+		mMainPassCB.Lights[i].Strength = { 5.2f, 5.1f, 5.0f };
+		mMainPassCB.Lights[i].FalloffStart = 1.0f;
+		mMainPassCB.Lights[i].FalloffEnd = 10.1f;
+		mMainPassCB.Lights[i].SpotPower = 8.0f;
+	}
+
+	//mMainPassCB.Lights[4].Position = { -5.0f, 3.5f, -5.0f };
+	//mMainPassCB.Lights[4].Strength = { 2.2f, 2.2f, 2.2f };
+	//mMainPassCB.Lights[4].FalloffStart = 1.0f;
+	//mMainPassCB.Lights[4].FalloffEnd = 8.0f;
+
+	//mMainPassCB.Lights[5].Position = { -5.0f, 3.5f, 0.0f };
+	//mMainPassCB.Lights[5].Strength = { 2.2f, 2.2f, 2.2f };
+	//mMainPassCB.Lights[5].FalloffStart = 1.0f;
+	//mMainPassCB.Lights[5].FalloffEnd = 8.0f;
+
+	//mMainPassCB.Lights[6].Position = { -5.0f, 3.5f, 5.0f };
+	//mMainPassCB.Lights[6].Strength = { 2.2f, 2.2f, 2.2f };
+	//mMainPassCB.Lights[6].FalloffStart = 1.0f;
+	//mMainPassCB.Lights[6].FalloffEnd = 8.0f;
+
+	//mMainPassCB.Lights[7].Position = { -5.0f, 3.5f, 10.0f };
+	//mMainPassCB.Lights[7].Strength = { 2.2f, 2.2f, 2.2f };
+	//mMainPassCB.Lights[7].FalloffStart = 1.0f;
+	//mMainPassCB.Lights[7].FalloffEnd = 8.0f;
+
+	//// Spot Lights
+	//mMainPassCB.Lights[8].Position = { 5.0f, 3.5f, -10.0f };
+	//mMainPassCB.Lights[8].Strength = { 2.2f, 2.2f, 2.2f };
+	//mMainPassCB.Lights[8].FalloffStart = 1.0f;
+	//mMainPassCB.Lights[8].FalloffEnd = 8.0f;
+	//mMainPassCB.Lights[8].SpotPower = 64.0f;
+
+	//mMainPassCB.Lights[9].Position = { 5.0f, 3.5f, -5.0f };
+	//mMainPassCB.Lights[9].Strength = { 2.2f, 2.2f, 2.2f };
+	//mMainPassCB.Lights[9].FalloffStart = 1.0f;
+	//mMainPassCB.Lights[9].FalloffEnd = 8.0f;
+	//mMainPassCB.Lights[9].SpotPower = 64.0f;
+
+	//mMainPassCB.Lights[10].Position = { 5.0f, 3.5f, 0.0f };
+	//mMainPassCB.Lights[10].Strength = { 2.2f, 2.2f, 2.2f };
+	//mMainPassCB.Lights[10].FalloffStart = 1.0f;
+	//mMainPassCB.Lights[10].FalloffEnd = 8.0f;
+	//mMainPassCB.Lights[10].SpotPower = 64.0f;
+
+	//mMainPassCB.Lights[11].Position = { 5.0f, 3.5f, 5.0f };
+	//mMainPassCB.Lights[11].Strength = { 2.2f, 2.2f, 2.2f };
+	//mMainPassCB.Lights[11].FalloffStart = 1.0f;
+	//mMainPassCB.Lights[11].FalloffEnd = 8.0f;
+	//mMainPassCB.Lights[11].SpotPower = 64.0f;
+
+	//mMainPassCB.Lights[12].Position = { 5.0f, 3.5f, 10.0f };
+	//mMainPassCB.Lights[12].Strength = { 2.2f, 2.2f, 2.2f };
+	//mMainPassCB.Lights[12].FalloffStart = 1.0f;
+	//mMainPassCB.Lights[12].FalloffEnd = 8.0f;
+	//mMainPassCB.Lights[12].SpotPower = 64.0f;
 
 	auto currPassCB = mCurrFrameResource->PassCB.get();
 	currPassCB->CopyData(0, mMainPassCB);
@@ -480,96 +554,44 @@ void CRYCHIC::UpdateMainPassCB(const GameTimer& gt)
 
 void CRYCHIC::LoadTextures()
 {
-	
+	std::vector<std::string> texs =
+	{
+		"bricksTex",
+		"stoneTex",
+		"tileTex",
+		"crateTex",
+		"crate02Tex",
+		"flareTex",
+		"iceTex",
+		"defaultTex",
+		"skyCubeMap"
+	};
 
-	// tex0
-	auto bricksTex = std::make_unique<Texture>();
-	bricksTex->Name = "bricksTex";
-	bricksTex->Filename = L"Textures/bricks.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), bricksTex->Filename.c_str(),
-		bricksTex->Resource, bricksTex->UploadHeap));
-	texNames.push_back(bricksTex->Name);
-	mTexSize++;
+	std::vector<std::wstring> fileNames = {
+		L"Textures/bricks.dds",
+		L"Textures/stone.dds",
+		L"Textures/tile.dds",
+		L"Textures/WoodCrate01.dds",
+		L"Textures/WoodCrate02.dds",
+		L"Textures/flare.dds",
+		L"Textures/ice.dds",
+		L"Textures/white1x1.dds",
+		L"Textures/grasscube1024.dds"
+	};
 
-	// tex1
-	auto stoneTex = std::make_unique<Texture>();
-	stoneTex->Name = "stoneTex";
-	stoneTex->Filename = L"Textures/stone.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), stoneTex->Filename.c_str(),
-		stoneTex->Resource, stoneTex->UploadHeap));
-	texNames.push_back(stoneTex->Name);
-	mTexSize++;
-
-	// tex2
-	auto tileTex = std::make_unique<Texture>();
-	tileTex->Name = "tileTex";
-	tileTex->Filename = L"Textures/tile.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), tileTex->Filename.c_str(),
-		tileTex->Resource, tileTex->UploadHeap));
-	texNames.push_back(tileTex->Name);
-	mTexSize++;
-
-	// tex3
-	auto crateTex = std::make_unique<Texture>();
-	crateTex->Name = "crateTex";
-	crateTex->Filename = L"Textures/WoodCrate01.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), crateTex->Filename.c_str(),
-		crateTex->Resource, crateTex->UploadHeap));
-	texNames.push_back(crateTex->Name);
-	mTexSize++;
-
-	// tex4
-	auto crate02Tex = std::make_unique<Texture>();
-	crate02Tex->Name = "crate02Tex";
-	crate02Tex->Filename = L"Textures/WoodCrate02.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), crate02Tex->Filename.c_str(),
-		crate02Tex->Resource, crate02Tex->UploadHeap));
-	texNames.push_back(crateTex->Name);
-	mTexSize++;
-
-	// tex5
-	auto flareTex = std::make_unique<Texture>();
-	flareTex->Name = "flareTex";
-	flareTex->Filename = L"Textures/flare.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), flareTex->Filename.c_str(),
-		flareTex->Resource, flareTex->UploadHeap));
-	texNames.push_back(flareTex->Name);
-	mTexSize++;
-
-	// tex6
-	auto iceTex = std::make_unique<Texture>();
-	iceTex->Name = "iceTex";
-	iceTex->Filename = L"Textures/ice.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), iceTex->Filename.c_str(),
-		iceTex->Resource, iceTex->UploadHeap));
-	texNames.push_back(iceTex->Name);
-	mTexSize++;
-
-	// tex7
-	auto defaultTex = std::make_unique<Texture>();
-	defaultTex->Name = "defaultTex";
-	defaultTex->Filename = L"Textures/white1x1.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), defaultTex->Filename.c_str(),
-		defaultTex->Resource, defaultTex->UploadHeap));
-	texNames.push_back(defaultTex->Name);
-	mTexSize++;
-
-	mTextures[bricksTex->Name] = std::move(bricksTex);
-	mTextures[stoneTex->Name] = std::move(stoneTex);
-	mTextures[tileTex->Name] = std::move(tileTex);
-	mTextures[crateTex->Name] = std::move(crateTex);
-	mTextures[crate02Tex->Name] = std::move(crate02Tex);
-	mTextures[flareTex->Name] = std::move(flareTex);
-	mTextures[iceTex->Name] = std::move(iceTex);
-	mTextures[defaultTex->Name] = std::move(defaultTex);
+	for (int i = 0; i < texs.size(); i++)
+	{
+		auto tex = std::make_unique<Texture>();
+		tex->Name = texs[i];
+		tex->Filename = fileNames[i];
+		ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
+			mCommandList.Get(), tex->Filename.c_str(),
+			tex->Resource, tex->UploadHeap));
+		mTextures[tex->Name] = std::move(tex);
+	}
+	// 记录纹理数量后续用来创建srv
+	mTexSize = texs.size();
+	texNames = std::move(texs);
 }
 
 void CRYCHIC::BuildRootSignature()
@@ -723,6 +745,8 @@ void CRYCHIC::BuildShadersAndInputLayout()
 	mShaders["gBufferPS"] = d3dUtil::CompileShader(L"Shaders\\GBufferPass.hlsl", nullptr, "GBufferPS", "ps_5_1");
 	mShaders["deferredShadingVS"] = d3dUtil::CompileShader(L"Shaders\\DeferredShading.hlsl", nullptr, "DeferredVS", "vs_5_1");
 	mShaders["deferredShadingPS"] = d3dUtil::CompileShader(L"Shaders\\DeferredShading.hlsl", nullptr, "DeferredPS", "ps_5_1");
+	mShaders["skyVS"] = d3dUtil::CompileShader(L"Shaders\\sky.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["skyPS"] = d3dUtil::CompileShader(L"Shaders\\sky.hlsl", nullptr, "PS", "ps_5_1");
 
 	mInputLayout =
 	{
@@ -798,7 +822,7 @@ void CRYCHIC::BuildShapeGeometry()
 	XMVECTOR vMax = XMLoadFloat3(&vMaxf3);
 
 	UINT k = 0;
-	for (size_t i = 0; i < box.Vertices.size(); ++i, ++k)
+	for (int i = 0; i < box.Vertices.size(); ++i, ++k)
 	{
 		vertices[k].Pos = box.Vertices[i].Position;
 		vertices[k].Normal = box.Vertices[i].Normal;
@@ -817,7 +841,7 @@ void CRYCHIC::BuildShapeGeometry()
 	vMin = XMLoadFloat3(&vMinf3);
 	vMax = XMLoadFloat3(&vMaxf3);
 
-	for (size_t i = 0; i < grid.Vertices.size(); ++i, ++k)
+	for (int i = 0; i < grid.Vertices.size(); ++i, ++k)
 	{
 		vertices[k].Pos = grid.Vertices[i].Position;
 		vertices[k].Normal = grid.Vertices[i].Normal;
@@ -834,7 +858,7 @@ void CRYCHIC::BuildShapeGeometry()
 
 	vMin = XMLoadFloat3(&vMinf3);
 	vMax = XMLoadFloat3(&vMaxf3);
-	for (size_t i = 0; i < sphere.Vertices.size(); ++i, ++k)
+	for (int i = 0; i < sphere.Vertices.size(); ++i, ++k)
 	{
 		vertices[k].Pos = sphere.Vertices[i].Position;
 		vertices[k].Normal = sphere.Vertices[i].Normal;
@@ -1096,6 +1120,23 @@ void CRYCHIC::BuildPSOs()
 	mShaders["deferredShadingPS"]->GetBufferSize()
 	};
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&deferredPsoDesc, IID_PPV_ARGS(&mPSOs["deferred"])));
+
+	//
+	// PSO for skybox.
+	//
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC skyPsoDesc = opaquePsoDesc;
+	skyPsoDesc.VS = {
+		reinterpret_cast<BYTE*>(mShaders["skyVS"]->GetBufferPointer()),
+		mShaders["skyVS"]->GetBufferSize()
+	};
+	skyPsoDesc.PS = {
+	reinterpret_cast<BYTE*>(mShaders["skyPS"]->GetBufferPointer()),
+	mShaders["skyPS"]->GetBufferSize()
+	};
+	// 从cubemap中心向cubemap采样
+	skyPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	skyPsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&skyPsoDesc, IID_PPV_ARGS(&mPSOs["sky"])));
 }
 
 void CRYCHIC::BuildFrameResources()
@@ -1117,6 +1158,7 @@ void CRYCHIC::BuildMaterials()
 	bricks0->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	bricks0->FresnelR0 = XMFLOAT3(0.02f, 0.02f, 0.02f);
 	bricks0->Roughness = 0.1f;
+	bricks0->Metalness = 0.3f;
 
 	// mat1
 	auto stone0 = std::make_unique<Material>();
@@ -1135,6 +1177,7 @@ void CRYCHIC::BuildMaterials()
 	tile0->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	tile0->FresnelR0 = XMFLOAT3(0.02f, 0.02f, 0.02f);
 	tile0->Roughness = 0.3f;
+	tile0->Metalness = 0.1f;
 
 	// mat3
 	auto crate0 = std::make_unique<Material>();
@@ -1220,6 +1263,7 @@ void CRYCHIC::BuildRenderItems()
 		XMStoreFloat4x4(&boxRitem->Instances[i].TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
 		boxRitem->Instances[i].MaterialIndex = 5; // flareMat
 	}
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(boxRitem.get());
 	mAllRitems.push_back(std::move(boxRitem));
 
 	auto gridRitem = std::make_unique<RenderItem>();
@@ -1246,6 +1290,7 @@ void CRYCHIC::BuildRenderItems()
 		XMStoreFloat4x4(&gridRitem->Instances[i].TexTransform, XMMatrixScaling(8.0f, 8.0f, 1.0f));
 		gridRitem->Instances[i].MaterialIndex = 2; // tileMat
 	}
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(gridRitem.get());
 	mAllRitems.push_back(std::move(gridRitem));
 
 	auto skullRitem = std::make_unique<RenderItem>();
@@ -1266,11 +1311,12 @@ void CRYCHIC::BuildRenderItems()
 	skullRitem->Instances.resize(skullInstanceCount);
 	for (size_t i = 0; i < skullInstanceCount; i++)
 	{
-		XMMATRIX world = XMMatrixMultiply(XMMatrixScaling(0.5f, 0.5f, 0.5f), XMMatrixTranslation(0.0f, 1.5f, 0.0f));
+		XMMATRIX world = XMMatrixMultiply(XMMatrixScaling(0.5f, 0.5f, 0.5f), XMMatrixTranslation(0.0f, 2.0f, 0.0f));
 		XMStoreFloat4x4(&skullRitem->Instances[i].World, world);
 		XMStoreFloat4x4(&skullRitem->Instances[i].TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
 		skullRitem->Instances[i].MaterialIndex = 7; // defaultMat
 	}
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(skullRitem.get());
 	mAllRitems.push_back(std::move(skullRitem));
 
 	auto carRitem = std::make_unique<RenderItem>();
@@ -1282,7 +1328,7 @@ void CRYCHIC::BuildRenderItems()
 	carRitem->IndexCount = carRitem->Geo->DrawArgs["car"].IndexCount;
 	carRitem->StartIndexLocation = carRitem->Geo->DrawArgs["car"].StartIndexLocation;
 	carRitem->BaseVertexLocation = carRitem->Geo->DrawArgs["car"].BaseVertexLocation;
-	carRitem->Bounds = carRitem->Geo->DrawArgs["skull"].Bounds;
+	carRitem->Bounds = carRitem->Geo->DrawArgs["car"].Bounds;
 
 	// generate car instance data
 	UINT carInstanceCount = 1;
@@ -1296,6 +1342,7 @@ void CRYCHIC::BuildRenderItems()
 		XMStoreFloat4x4(&carRitem->Instances[i].TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
 		carRitem->Instances[i].MaterialIndex = 6; // iceMat
 	}
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(carRitem.get());
 	mAllRitems.push_back(std::move(carRitem));
 
 
@@ -1379,14 +1426,31 @@ void CRYCHIC::BuildRenderItems()
 		XMStoreFloat4x4(&rightSphereRitem->Instances[i].TexTransform, brickTexTransform);
 		rightSphereRitem->Instances[i].MaterialIndex = 1; // stonekMat
 	}
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(leftCylRitem.get());
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(rightCylRitem.get());
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(leftSphereRitem.get());
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(rightSphereRitem.get());
 	mAllRitems.push_back(std::move(leftCylRitem));
 	mAllRitems.push_back(std::move(rightCylRitem));
 	mAllRitems.push_back(std::move(leftSphereRitem));
 	mAllRitems.push_back(std::move(rightSphereRitem));
 
-	// All the render items are opaque.
-	for (auto& e : mAllRitems)
-		mOpaqueRitems.push_back(e.get());
+	auto skyRitem = std::make_unique<RenderItem>();
+	skyRitem->Geo = mGeometries["shapeGeo"].get();
+	skyRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	skyRitem->IndexCount = skyRitem->Geo->DrawArgs["sphere"].IndexCount;
+	skyRitem->StartIndexLocation = skyRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
+	skyRitem->BaseVertexLocation = skyRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
+	skyRitem->Bounds = skyRitem->Geo->DrawArgs["sphere"].Bounds;
+	UINT skyInstanceCount = 1;
+	skyRitem->InstanceCount = skyInstanceCount;
+	mInstanceCount += skyInstanceCount;
+	skyRitem->Instances.resize(skyInstanceCount);
+	XMStoreFloat4x4(&skyRitem->Instances[0].World, XMMatrixScaling(5000.0f, 5000.0f, 5000.0f));
+	skyRitem->TexTransform = MathHelper::Identity4x4();
+
+	mRitemLayer[(int)RenderLayer::Sky].push_back(skyRitem.get());
+	mAllRitems.push_back(std::move(skyRitem));
 }
 
 void CRYCHIC::BuildInstancingSceneRenderItems()
@@ -1431,10 +1495,8 @@ void CRYCHIC::BuildInstancingSceneRenderItems()
 			}
 		}
 	}
+	mRitemLayer[(int)RenderLayer::Opaque].push_back(boxRitem.get());
 	mAllRitems.push_back(std::move(boxRitem));
-	// All the render items are opaque.
-	for (auto& e : mAllRitems)
-		mOpaqueRitems.push_back(e.get());
 }
 
 void CRYCHIC::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems)
@@ -1484,7 +1546,7 @@ void CRYCHIC::DrawGBuffer()
 		mDeferred->gBuffer2Rtv(), mDeferred->gBuffer3Rtv() };
 	mCommandList->OMSetRenderTargets(4, deferredRtvs, false, &DepthStencilView());
 
-	DrawRenderItems(mCommandList.Get(), mOpaqueRitems);
+	DrawRenderItems(mCommandList.Get(), mRitemLayer[int(RenderLayer::Opaque)]);
 
 	// Change back to GENERIC_READ so we can read the texture in a shader.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mDeferred->gBuffer0Resource(),

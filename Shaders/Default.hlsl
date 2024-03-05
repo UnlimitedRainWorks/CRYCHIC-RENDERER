@@ -2,19 +2,6 @@
 // Default.hlsl by Frank Luna (C) 2015 All Rights Reserved.
 //***************************************************************************************
 
-// Defaults for number of lights.
-#ifndef NUM_DIR_LIGHTS
-    #define NUM_DIR_LIGHTS 3
-#endif
-
-#ifndef NUM_POINT_LIGHTS
-    #define NUM_POINT_LIGHTS 0
-#endif
-
-#ifndef NUM_SPOT_LIGHTS
-    #define NUM_SPOT_LIGHTS 0
-#endif
-
 #include "Common.hlsl"
 struct VertexIn
 {
@@ -69,10 +56,10 @@ float4 PS(VertexOut pin) : SV_Target
 {
 	// Fetch the material data.
 	MaterialData matData = gMaterialData[pin.MatIndex];
-	//MaterialData matData = gMaterialData[7];
 	float4 diffuseAlbedo = matData.DiffuseAlbedo;
 	float3 fresnelR0 = matData.FresnelR0;
 	float  roughness = matData.Roughness;
+    float  metalness = matData.Metalness;
 	uint diffuseTexIndex = matData.DiffuseMapIndex;
 
 	// Dynamically look up the texture in the array.
@@ -84,15 +71,18 @@ float4 PS(VertexOut pin) : SV_Target
     // Vector from point being lit to eye. 
     float3 toEyeW = normalize(gEyePosW - pin.PosW);
 
-    // Light terms.
-    float4 ambient = gAmbientLight*diffuseAlbedo;
+    // vertex pos
+    float3 pos = pin.PosW;
 
-    const float shininess = 1.0f - roughness;
-    Material mat = { diffuseAlbedo, fresnelR0, shininess };
+    // Light terms.
+    float4 ambient = gAmbientLight * diffuseAlbedo;
+
+    //const float shininess = 1.0f - roughness;
+    Material1 mat = { diffuseAlbedo.xyz, roughness, metalness };
     float3 shadowFactor = 1.0f;
     //float4 directLight = ComputeLighting(gLights, mat, pin.PosW,
     //    pin.NormalW, toEyeW, shadowFactor);
-    float4 directLight = PBRShading(gLights, mat, pin.NormalW, toEyeW);
+    float4 directLight = PBRShading(gLights, mat, pin.NormalW, toEyeW, pos);
     float4 litColor = ambient + directLight;
 
     // Common convention to take alpha from diffuse albedo.

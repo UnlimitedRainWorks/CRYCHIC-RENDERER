@@ -55,6 +55,13 @@ struct RenderItem
 	UINT itemIndex = 0;
 };
 
+enum class RenderLayer : int
+{
+	Opaque = 0,
+	Sky,
+	Count
+};
+
 class CRYCHIC : public D3DApp 
 {
 public:
@@ -95,12 +102,13 @@ private:
 	void BuildInstancingSceneRenderItems();
 	void DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems);
 	void DrawGBuffer();
+	
 	std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GetStaticSamplers();
 
 private:
 
 	//  «∑Òø™∆Ù—”≥Ÿ‰÷»æ
-	bool isDeferred = true;
+	bool isDeferred = false;
 
 	UINT mTexSize = 0;
 	UINT mGBufferSize = 4;
@@ -127,13 +135,15 @@ private:
 	std::vector<std::unique_ptr<RenderItem>> mAllRitems;
 
 	// Render items divided by PSO.
-	std::vector<RenderItem*> mOpaqueRitems;
+	std::vector<RenderItem*> mRitemLayer[(int)RenderLayer::Count];
 
 	UINT mInstanceCount = 0;
 	UINT mTexsHeapIndex = 0;
 	UINT gBufferHeapIndex = 0;
 	std::unique_ptr<DeferredRenderTarget> mDeferred = nullptr;
-
+	//std::unique_ptr<DeferredRenderTarget> mDeferred = nullptr;
+	//mDeferred = std::make_unique<DeferredRenderTarget>(md3dDevice.Get(),
+	//	mClientWidth, mClientHeight, DXGI_FORMAT_R32G32B32A32_FLOAT);
 	BoundingFrustum mCamFrustum;
 
 	bool mFrustumCullingEnabled = true;

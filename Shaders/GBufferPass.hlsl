@@ -61,13 +61,13 @@ GBuffer GBufferPS(VertexOutGBuffer pin)
 						   //float3 albedo, float3 normal, float roughness)
     float3 posW = pin.PosW;
     float3 normalW = normalize(pin.NormalW);
-    float metalness = 0.3f;
-    
+   
     // Fetch the material data.
 	MaterialData matData = gMaterialData[pin.MatIndex];
 	float4 diffuseAlbedo = matData.DiffuseAlbedo;
 	float3 fresnelR0 = matData.FresnelR0;
 	float  roughness = matData.Roughness;
+    float  metalness = matData.Metalness;
 	uint diffuseTexIndex = matData.DiffuseMapIndex;
 
 	// Dynamically look up the texture in the array.
