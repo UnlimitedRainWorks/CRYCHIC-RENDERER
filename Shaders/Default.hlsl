@@ -85,9 +85,17 @@ float4 PS(VertexOut pin) : SV_Target
     float4 directLight = PBRShading(gLights, mat, pin.NormalW, toEyeW, pos);
     float4 litColor = ambient + directLight;
 
+    // Add in specular reflections.
+    float3 r = reflect(-toEyeW, pin.NormalW);
+    float4 reflectionColor = gCubeMap.Sample(gsamLinearWrap, r);
+    float3 f0 = lerp(0.04, diffuseAlbedo.xyz, metalness);
+    float nov = max(dot(pin.NormalW, toEyeW), 0.001f);
+    float3 FresnelFactor = f0 + (1 - f0) * pow(1 - nov, 5);
+    litColor.xyz += FresnelFactor * reflectionColor.xyz;
+
     // Common convention to take alpha from diffuse albedo.
     litColor.a = diffuseAlbedo.a;
-
+    //return reflectionColor;
     return litColor;
 }
 

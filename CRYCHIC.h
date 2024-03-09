@@ -6,6 +6,7 @@
 #include "Common/Camera.h"
 #include "FrameResource.h"
 #include "DeferredRenderTarget.h"
+#include "CubeRenderTarget.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
@@ -16,12 +17,30 @@ using namespace DirectX::PackedVector;
 
 const int gNumFrameResources = 3;
 
+const UINT CubeMapSize = 512;
 // Lightweight structure stores parameters to draw a shape.  This will
 // vary from app-to-app.
 struct RenderItem
 {
 	RenderItem() = default;
 	RenderItem(const RenderItem& rhs) = delete;
+	/*{
+		World = rhs.World;
+		TexTransform = rhs.TexTransform;
+		Mat = rhs.Mat;
+		Geo = rhs.Geo;
+		IndexCount = rhs.IndexCount;
+		StartIndexLocation = rhs.StartIndexLocation;
+		BaseVertexLocation = rhs.BaseVertexLocation;
+		InstanceCount = rhs.InstanceCount;
+		Bounds = rhs.Bounds;
+		itemIndex = rhs.itemIndex;
+		Instances.resize(rhs.Instances.size());
+		for (int i = 0; i < rhs.Instances.size(); i++)
+		{
+			Instances[i] = rhs.Instances[i];
+		}
+	}*/
 
 	// World matrix of the shape that describes the object's local space
 	// relative to the world space, which defines the position, orientation,
@@ -58,7 +77,10 @@ struct RenderItem
 enum class RenderLayer : int
 {
 	Opaque = 0,
+	OpaqueDynamicReflectors,
 	Sky,
+	OpaqueDynamicCamera,
+	SkyDynamicCamera,
 	Count
 };
 
@@ -86,9 +108,11 @@ private:
 	void AnimateMaterials(const GameTimer& gt);
 	//void UpdateObjectCBs(const GameTimer& gt);
 	void UpdateInstanceData(const GameTimer& gt);
+	//void UpdateInstanceData(const Camera& camera, std::vector<std::unique_ptr<RenderItem>>& ri);
 	void UpdateMaterialBuffer(const GameTimer& gt);
 	void UpdateMainPassCB(const GameTimer& gt);
-
+	void UpdateCubeMapFacePassCBs();
+	void BuildCubeFaceCamera(float x, float y, float z);
 	void LoadTextures();
 	void BuildRootSignature();
 	void BuildDescriptorHeaps();
@@ -99,19 +123,28 @@ private:
 	void BuildFrameResources();
 	void BuildMaterials();
 	void BuildRenderItems();
-	void BuildInstancingSceneRenderItems();
+	void BuildCubeMapRenderItems();
+	//void BuildInstancingSceneRenderItems();
 	void DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems);
 	void DrawGBuffer();
-	
+	void DrawSceneToCubeMap();
+	void BuildCubeDepthStencil();
 	std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GetStaticSamplers();
 
 private:
 
 	//  «∑Òø™∆Ù—”≥Ÿ‰÷»æ
-	bool isDeferred = false;
+	bool isDeferred = true;
 
 	UINT mTexSize = 0;
 	UINT mGBufferSize = 4;
+	UINT mCubemapRTSize = 6;
+	// cubemap num
+	UINT mCubemapSize = 0;
+	UINT mDynamicCubemapSize = 1;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE mCubeDSV;
+	std::unique_ptr<CubeRenderTarget> mDynamicCubeMap = nullptr;
+
 	std::vector<std::unique_ptr<FrameResource>> mFrameResources;
 	FrameResource* mCurrFrameResource = nullptr;
 	int mCurrFrameResourceIndex = 0;
@@ -123,6 +156,8 @@ private:
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 	ComPtr<ID3D12DescriptorHeap> gBufferSrvDescriptorHeap = nullptr;
 
+	ComPtr<ID3D12Resource> mCubeDepthStencilBuffer;
+
 	std::unordered_map<std::string, std::unique_ptr<MeshGeometry>> mGeometries;
 	std::unordered_map<std::string, std::unique_ptr<Material>> mMaterials;
 	std::unordered_map<std::string, std::unique_ptr<Texture>> mTextures;
@@ -133,17 +168,17 @@ private:
 
 	// List of all the render items.
 	std::vector<std::unique_ptr<RenderItem>> mAllRitems;
+	std::vector<std::unique_ptr<RenderItem>> mCubeMapAllRitems;
 
 	// Render items divided by PSO.
 	std::vector<RenderItem*> mRitemLayer[(int)RenderLayer::Count];
 
-	UINT mInstanceCount = 0;
-	UINT mTexsHeapIndex = 0;
+	//UINT mInstanceCount = 0;
+	UINT mCubeMapTexHeapIndex = 0;
+	UINT mDynamicTexHeapIndex = 0;
 	UINT gBufferHeapIndex = 0;
 	std::unique_ptr<DeferredRenderTarget> mDeferred = nullptr;
-	//std::unique_ptr<DeferredRenderTarget> mDeferred = nullptr;
-	//mDeferred = std::make_unique<DeferredRenderTarget>(md3dDevice.Get(),
-	//	mClientWidth, mClientHeight, DXGI_FORMAT_R32G32B32A32_FLOAT);
+
 	BoundingFrustum mCamFrustum;
 
 	bool mFrustumCullingEnabled = true;
@@ -151,6 +186,7 @@ private:
 	PassConstants mMainPassCB;
 
 	Camera mCamera;
+	Camera mCubeMapCamera[6];
 
 	POINT mLastMousePos;
 
@@ -161,4 +197,8 @@ private:
 	float mRadius = 15.0f;
 
 	std::vector<std::string> texNames;
+	std::vector<std::string> cubeMapNames;
+	std::vector<int> mInstancesCount;
+	UINT mItemIndex = 0;
+	UINT mSceneItemCount = 0;
 };

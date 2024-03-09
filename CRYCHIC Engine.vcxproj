@@ -137,6 +137,7 @@
     <ClCompile Include="Common\GeometryGenerator.cpp" />
     <ClCompile Include="Common\MathHelper.cpp" />
     <ClCompile Include="CRYCHIC.cpp" />
+    <ClCompile Include="CubeRenderTarget.cpp" />
     <ClCompile Include="DeferredRenderTarget.cpp" />
     <ClCompile Include="FrameResource.cpp" />
   </ItemGroup>
@@ -151,6 +152,7 @@
     <ClInclude Include="Common\MathHelper.h" />
     <ClInclude Include="Common\UploadBuffer.h" />
     <ClInclude Include="CRYCHIC.h" />
+    <ClInclude Include="CubeRenderTarget.h" />
     <ClInclude Include="DeferredRenderTarget.h" />
     <ClInclude Include="FrameResource.h" />
   </ItemGroup>

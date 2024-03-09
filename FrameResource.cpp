@@ -1,6 +1,6 @@
 #include "FrameResource.h"
 
-FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT maxInstancesCount,
+FrameResource::FrameResource(ID3D12Device* device, UINT passCount, std::vector<int>& InstancesCount,
     UINT maxRenderItems, UINT materialCount)
 {
     ThrowIfFailed(device->CreateCommandAllocator(
@@ -12,7 +12,7 @@ FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT maxInsta
     InstanceBuffers.resize(maxRenderItems);
     for (size_t i = 0; i < maxRenderItems; i++)
     {
-        InstanceBuffers[i] = std::make_unique<UploadBuffer<InstanceData>>(device, maxInstancesCount, false);
+        InstanceBuffers[i] = std::make_unique<UploadBuffer<InstanceData>>(device, InstancesCount[i], false);
     }
 }
 

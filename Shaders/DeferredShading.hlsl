@@ -50,6 +50,15 @@ float4 DeferredPS(VertexOutDeferred pin) : SV_Target
     float3 shadowFactor = 1.0f;
     float4 directLight = PBRShading(gLights, mat, normalW, toEyeW, posW);
     float4 litColor = ambient + directLight;
+
+    // Add in specular reflections.
+    float3 r = reflect(-toEyeW, normalW);
+    float4 reflectionColor = gCubeMap.Sample(gsamLinearWrap, r);
+    float3 f0 = lerp(0.04, albedo, metalness);
+    float nov = max(dot(normalW, toEyeW), 0.001f);
+    float3 FresnelFactor = f0 + (1 - f0) * pow(1 - nov, 5);
+    litColor.xyz += FresnelFactor * reflectionColor.xyz;
+
     litColor.a = 1.0;
     return litColor;
 }
