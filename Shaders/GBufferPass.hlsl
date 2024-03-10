@@ -10,6 +10,7 @@ struct VertexInGBuffer
 	float3 PosL    : POSITION;
     float3 NormalL : NORMAL;
 	float2 TexC    : TEXCOORD0;
+    float3 TangentL : TANGENT;
 };
 
 struct VertexOutGBuffer
@@ -18,6 +19,7 @@ struct VertexOutGBuffer
     float3 PosW    : POSITION;
     float3 NormalW : NORMAL;
 	float2 TexC    : TEXCOORD0;
+    float3 TangentW : TANGENT;
     // 该索引指向的都是未经插值的三角形
     nointerpolation uint MatIndex : MATINDEX;
 };
@@ -52,6 +54,7 @@ VertexOutGBuffer GBufferVS(VertexInGBuffer vin, uint instanceID : SV_InstanceID)
 	float4 texC = mul(float4(vin.TexC, 0.0f, 1.0f), gTexTransform);
 	vout.TexC = mul(texC, matData.MatTransform).xy;
 
+    vout.TangentW = mul(float4(vin.TangentL, 1.0f), gWorld).xyz;
     return vout;
 }
 
@@ -69,9 +72,16 @@ GBuffer GBufferPS(VertexOutGBuffer pin)
 	float  roughness = matData.Roughness;
     float  metalness = matData.Metalness;
 	uint diffuseTexIndex = matData.DiffuseMapIndex;
+    int normalMapIndex = matData.NormalMapIndex;
 
+    float3 normalT2W = normalW;
+    if (normalMapIndex > 0)
+    {
+        float3 normalT = gDiffuseMap[normalMapIndex].Sample(gsamAnisotropicWrap, pin.TexC).xyz;
+        normalT2W = EncodeNormalTangentSpace2World(normalT, normalW, pin.TangentW);
+    }
 	// Dynamically look up the texture in the array.
 	diffuseAlbedo *= gDiffuseMap[diffuseTexIndex].Sample(gsamLinearWrap, pin.TexC);
 
-    return EncodePBRToGBuffer(posW, metalness, diffuseAlbedo.xyz, normalW, roughness);
+    return EncodePBRToGBuffer(posW, metalness, diffuseAlbedo.xyz, normalT2W, roughness);
 }

@@ -1,14 +1,14 @@
 // Defaults for number of lights.
 #ifndef NUM_DIR_LIGHTS
-    #define NUM_DIR_LIGHTS 1
+    #define NUM_DIR_LIGHTS 3
 #endif
 
 #ifndef NUM_POINT_LIGHTS
-    #define NUM_POINT_LIGHTS 5
+    #define NUM_POINT_LIGHTS 0
 #endif
 
 #ifndef NUM_SPOT_LIGHTS
-    #define NUM_SPOT_LIGHTS 5
+    #define NUM_SPOT_LIGHTS 0
 #endif
 
 // Include structures and functions for lighting.
@@ -23,6 +23,7 @@ struct MaterialData
     float    Metalness;
 	float4x4 MatTransform;
 	uint     DiffuseMapIndex;
+    uint     NormalMapIndex;
 	uint     MatPad0;
 	uint     MatPad1;
 	uint     MatPad2;
@@ -39,10 +40,10 @@ struct InstanceData{
 
 // An array of textures, which is only supported in shader model 5.1+.  Unlike Texture2DArray, the textures
 // in this array can be different sizes and formats, making it more flexible than texture arrays.
-Texture2D gDiffuseMap[8] : register(t0);
-TextureCube gCubeMap : register(t8);
+Texture2D gDiffuseMap[11] : register(t0);
+TextureCube gCubeMap : register(t11);
 
-Texture2D gBuffer[4] : register(t9);
+Texture2D gBuffer[4] : register(t12);
 
 // Put in space1, so the texture array does not overlap with these resources.  
 // The texture array will occupy registers t0, t1, ..., t3 in space0. 
@@ -94,3 +95,13 @@ cbuffer cbPass : register(b0)
     // are spot lights for a maximum of MaxLights per object.
     Light gLights[MaxLights];
 };
+
+float3 EncodeNormalTangentSpace2World(float3 sampleNormal, float3 unitNormalW, float3 tangentW)
+{
+    float3 normalT = 2.0f * sampleNormal - 1.0f;
+    float3 N = unitNormalW;
+    float3 T = normalize(tangentW - dot(N, tangentW) * N);
+    float3 B = cross(T, N);
+    float3x3 TBN = float3x3(T, B, N);
+    return mul(normalT, TBN);
+}

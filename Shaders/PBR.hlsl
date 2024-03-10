@@ -7,13 +7,6 @@
 #include "LightingUtil.hlsl"
 #define pi 3.1415926
 
-struct Material1
-{
-    float3 DiffuseAlbedo;
-    float Roughness;
-    float Metalness;
-};
-
 //---------------------------------------------------------------------------------------
 // NDF
 //---------------------------------------------------------------------------------------
@@ -84,7 +77,7 @@ float3 GetBRDF(float3 normal, float3 h, float3 v, float3 l, float3 diffuseAlbedo
 // PBRShading
 //---------------------------------------------------------------------------------------
 
-float4 PBRShading(Light gLights[MaxLights], Material1 mat,
+float4 PBRShading(Light gLights[MaxLights], Material mat,
                   float3 normal, float3 v, float3 pos)
 {
     float3 result = 0.0f;
@@ -94,7 +87,7 @@ float4 PBRShading(Light gLights[MaxLights], Material1 mat,
 #if (NUM_DIR_LIGHTS > 0)
     for(i = 0; i < NUM_DIR_LIGHTS; ++i)
     {
-        float3 diffuseAlbedo = mat.DiffuseAlbedo;
+        float3 diffuseAlbedo = mat.DiffuseAlbedo.xyz;
         float roughness = pow(mat.Roughness, 2.0);
         //float roughness = mat.Roughness;
         float metalness = mat.Metalness;
@@ -114,7 +107,7 @@ float4 PBRShading(Light gLights[MaxLights], Material1 mat,
 #if (NUM_POINT_LIGHTS > 0)
     for(i = NUM_DIR_LIGHTS; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS; ++i)
     {
-        float3 diffuseAlbedo = mat.DiffuseAlbedo;
+        float3 diffuseAlbedo = mat.DiffuseAlbedo.xyz;
         float roughness = pow(mat.Roughness, 2.0);
         //float roughness = mat.Roughness;
         float metalness = mat.Metalness;
@@ -143,7 +136,7 @@ float4 PBRShading(Light gLights[MaxLights], Material1 mat,
 #if (NUM_SPOT_LIGHTS > 0)
     for(i = NUM_DIR_LIGHTS + NUM_POINT_LIGHTS; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS + NUM_SPOT_LIGHTS; ++i)
     {
-        float3 diffuseAlbedo = mat.DiffuseAlbedo;
+        float3 diffuseAlbedo = mat.DiffuseAlbedo.xyz;
         float roughness = pow(mat.Roughness, 2.0);
         //float roughness = mat.Roughness;
         float metalness = mat.Metalness;

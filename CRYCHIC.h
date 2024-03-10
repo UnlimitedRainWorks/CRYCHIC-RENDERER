@@ -134,7 +134,7 @@ private:
 private:
 
 	// ÊÇ·ñ¿ªÆôÑÓ³ÙäÖÈ¾
-	bool isDeferred = true;
+	bool isDeferred = false;
 
 	UINT mTexSize = 0;
 	UINT mGBufferSize = 4;

@@ -445,7 +445,7 @@ void CRYCHIC::UpdateMaterialBuffer(const GameTimer& gt)
 			matData.Metalness = mat->Metalness;
 			XMStoreFloat4x4(&matData.MatTransform, XMMatrixTranspose(matTransform));
 			matData.DiffuseMapIndex = mat->DiffuseSrvHeapIndex;
-
+			matData.NormalMapIndex = mat->NormalSrvHeapIndex;
 			currMaterialBuffer->CopyData(mat->MatCBIndex, matData);
 
 			// Next FrameResource need to be updated too.
@@ -479,9 +479,9 @@ void CRYCHIC::UpdateMainPassCB(const GameTimer& gt)
 	mMainPassCB.DeltaTime = gt.DeltaTime();
 	mMainPassCB.AmbientLight = { 0.25f, 0.25f, 0.35f, 1.0f };
 
-	int dirLightsNum = 1;
-	int pointLightsNum = 5;
-	int spotLightsNum = 5;
+	int dirLightsNum = 3;
+	int pointLightsNum = 0;
+	int spotLightsNum = 0;
 	// Directional Lights
 	mMainPassCB.Lights[0].Direction = { 0.57735f, -0.57735f, 0.57735f };
 	mMainPassCB.Lights[0].Strength = { 2.8f, 2.8f, 2.8f };
@@ -585,13 +585,16 @@ void CRYCHIC::LoadTextures()
 	std::vector<std::string> texs =
 	{
 		"bricksTex",
+		"bricksNormalTex",
 		"stoneTex",
 		"tileTex",
+		"tileNormalTex",
 		"crateTex",
 		"crate02Tex",
 		"flareTex",
 		"iceTex",
 		"defaultTex",
+		"defaultNormalTex"
 	};
 
 	std::vector<std::string> cubeMapTexs =
@@ -600,18 +603,21 @@ void CRYCHIC::LoadTextures()
 	};
 
 	std::vector<std::wstring> fileNames = {
-		L"Textures/bricks.dds",
+		L"Textures/bricks2.dds",
+		L"Textures/bricks2_nmap.dds",
 		L"Textures/stone.dds",
 		L"Textures/tile.dds",
+		L"Textures/tile_nmap.dds",
 		L"Textures/WoodCrate01.dds",
 		L"Textures/WoodCrate02.dds",
 		L"Textures/flare.dds",
 		L"Textures/ice.dds",
 		L"Textures/white1x1.dds",
+		L"Textures/default_nmap.dds",
 	};
 
 	std::vector<std::wstring> cubeMapFiles = {
-		L"Textures/grasscube1024.dds"
+		L"Textures/snowcube1024.dds"
 	};
 
 	for (int i = 0; i < texs.size(); i++)
@@ -800,6 +806,7 @@ void CRYCHIC::BuildShadersAndInputLayout()
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 	};
 }
 
@@ -1201,16 +1208,17 @@ void CRYCHIC::BuildMaterials()
 	bricks0->Name = "bricks0";
 	bricks0->MatCBIndex = 0;
 	bricks0->DiffuseSrvHeapIndex = 0;
+	bricks0->NormalSrvHeapIndex = 1;
 	bricks0->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	bricks0->FresnelR0 = XMFLOAT3(0.02f, 0.02f, 0.02f);
-	bricks0->Roughness = 0.1f;
+	bricks0->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
+	bricks0->Roughness = 0.3f;
 	bricks0->Metalness = 0.3f;
 
 	// mat1
 	auto stone0 = std::make_unique<Material>();
 	stone0->Name = "stone0";
 	stone0->MatCBIndex = 1;
-	stone0->DiffuseSrvHeapIndex = 1;
+	stone0->DiffuseSrvHeapIndex = 2;
 	stone0->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	stone0->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	stone0->Roughness = 0.3f;
@@ -1219,17 +1227,18 @@ void CRYCHIC::BuildMaterials()
 	auto tile0 = std::make_unique<Material>();
 	tile0->Name = "tile0";
 	tile0->MatCBIndex = 2;
-	tile0->DiffuseSrvHeapIndex = 2;
-	tile0->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	tile0->FresnelR0 = XMFLOAT3(0.02f, 0.02f, 0.02f);
-	tile0->Roughness = 0.7f;
-	tile0->Metalness = 0.1f;
+	tile0->DiffuseSrvHeapIndex = 3;
+	tile0->NormalSrvHeapIndex = 4;
+	tile0->DiffuseAlbedo = XMFLOAT4(0.9f, 0.9f, 0.9f, 1.0f);
+	tile0->FresnelR0 = XMFLOAT3(0.2f, 0.2f, 0.2f);
+	tile0->Roughness = 0.1f;
+	tile0->Metalness = 0.2f;
 
 	// mat3
 	auto crate0 = std::make_unique<Material>();
 	crate0->Name = "crate0";
 	crate0->MatCBIndex = 3;
-	crate0->DiffuseSrvHeapIndex = 3;
+	crate0->DiffuseSrvHeapIndex = 5;
 	crate0->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	crate0->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	crate0->Roughness = 0.2f;
@@ -1238,7 +1247,7 @@ void CRYCHIC::BuildMaterials()
 	auto crate1 = std::make_unique<Material>();
 	crate1->Name = "crate1";
 	crate1->MatCBIndex = 4;
-	crate1->DiffuseSrvHeapIndex = 4;
+	crate1->DiffuseSrvHeapIndex = 6;
 	crate1->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	crate1->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	crate1->Roughness = 0.2f;
@@ -1247,7 +1256,7 @@ void CRYCHIC::BuildMaterials()
 	auto flare = std::make_unique<Material>();
 	flare->Name = "flare";
 	flare->MatCBIndex = 5;
-	flare->DiffuseSrvHeapIndex = 5;
+	flare->DiffuseSrvHeapIndex = 7;
 	flare->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	flare->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	flare->Roughness = 0.2f;
@@ -1257,7 +1266,7 @@ void CRYCHIC::BuildMaterials()
 	auto ice = std::make_unique<Material>();
 	ice->Name = "ice";
 	ice->MatCBIndex = 6;
-	ice->DiffuseSrvHeapIndex = 6;
+	ice->DiffuseSrvHeapIndex = 8;
 	ice->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	ice->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	ice->Roughness = 0.2f;
@@ -1266,7 +1275,8 @@ void CRYCHIC::BuildMaterials()
 	auto default = std::make_unique<Material>();
 	default->Name = "default";
 	default->MatCBIndex = 7;
-	default->DiffuseSrvHeapIndex = 7;
+	default->DiffuseSrvHeapIndex = 9;
+	default->NormalSrvHeapIndex = 10;
 	default->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	default->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	default->Roughness = 0.1f;
@@ -1275,10 +1285,11 @@ void CRYCHIC::BuildMaterials()
 	auto mirror = std::make_unique<Material>();
 	mirror->Name = "mirror";
 	mirror->MatCBIndex = 8;
-	mirror->DiffuseSrvHeapIndex = 7;
+	mirror->DiffuseSrvHeapIndex = 9;
+	mirror->NormalSrvHeapIndex = 10;
 	mirror->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	mirror->FresnelR0 = XMFLOAT3(0.95f, 0.95f, 0.95f);
-	mirror->Roughness = 0.5f;
+	mirror->Roughness = 0.1f;
 	mirror->Metalness = 0.95f;
 
 	mMaterials["bricks0"] = std::move(bricks0);
@@ -1466,7 +1477,7 @@ void CRYCHIC::BuildRenderItems()
 	mInstancesCount.push_back(rightSphereInstanceCount);
 	rightSphereRitem->Instances.resize(rightSphereInstanceCount);
 
-	XMMATRIX brickTexTransform = XMMatrixScaling(1.0f, 1.0f, 1.0f);
+	XMMATRIX brickTexTransform = XMMatrixScaling(1.5f, 2.0f, 1.0f);
 	for (size_t i = 0; i < 5; i++)
 	{
 		XMMATRIX leftCylWorld = XMMatrixTranslation(-5.0f, 1.5f, -10.0f + i * 5.0f);

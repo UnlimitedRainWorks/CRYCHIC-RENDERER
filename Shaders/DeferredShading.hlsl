@@ -40,10 +40,10 @@ float4 DeferredPS(VertexOutDeferred pin) : SV_Target
     float roughness = pbrDesc.roughness;
     float3 normalW = pbrDesc.normal;
     float3 toEyeW = normalize(gEyePosW - posW);
-    float4 ambient = gAmbientLight * float4(albedo, 1.0);
+    float4 ambient = gAmbientLight * float4(albedo, 1.0f);
     //float3 fresnelR0 = lerp(0.04, albedo, metalness);
-    Material1 mat;
-    mat.DiffuseAlbedo = albedo;
+    Material mat;
+    mat.DiffuseAlbedo = float4(albedo, 1.0f);
     mat.Roughness = roughness;
     mat.Metalness = metalness;
     //= { albedo, roughness, metalness};

@@ -19,10 +19,18 @@ struct Light
 struct Material
 {
     float4 DiffuseAlbedo;
+    float Roughness;
+    float Metalness;
     float3 FresnelR0;
     float Shininess;
 };
 
+//struct Material
+//{
+//    float3 DiffuseAlbedo;
+//    float Roughness;
+//    float Metalness;
+//};
 float CalcAttenuation(float d, float falloffStart, float falloffEnd)
 {
     // Linear falloff.
