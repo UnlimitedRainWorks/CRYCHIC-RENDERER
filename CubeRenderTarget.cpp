@@ -108,10 +108,10 @@ void CubeRenderTarget::BuildResource()
 	// Clear the back buffer and depth buffer.
 	D3D12_CLEAR_VALUE clearValue = {};
 	clearValue.Format = mFormat;
-	clearValue.Color[0] = 0;
-	clearValue.Color[1] = 0;
-	clearValue.Color[2] = 0;
-	clearValue.Color[3] = 1;
+	clearValue.Color[0] = 0.0f;
+	clearValue.Color[1] = 0.0f;
+	clearValue.Color[2] = 0.0f;
+	clearValue.Color[3] = 1.0f;
 
 	ThrowIfFailed(md3dDevice->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),

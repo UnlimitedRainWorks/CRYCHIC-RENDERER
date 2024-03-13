@@ -38,7 +38,7 @@ float4 DeferredPS(VertexOutDeferred pin) : SV_Target
     float metalness = pbrDesc.metalness;
     float3 albedo = pbrDesc.albedo;
     float roughness = pbrDesc.roughness;
-    float3 normalW = pbrDesc.normal;
+    float3 normalW = pbrDesc.normal.xyz;
     float3 toEyeW = normalize(gEyePosW - posW);
     float4 ambient = gAmbientLight * float4(albedo, 1.0f);
     //float3 fresnelR0 = lerp(0.04, albedo, metalness);
@@ -46,9 +46,21 @@ float4 DeferredPS(VertexOutDeferred pin) : SV_Target
     mat.DiffuseAlbedo = float4(albedo, 1.0f);
     mat.Roughness = roughness;
     mat.Metalness = metalness;
-    //= { albedo, roughness, metalness};
-    float3 shadowFactor = 1.0f;
-    float4 directLight = PBRShading(gLights, mat, normalW, toEyeW, posW);
+    mat.Shininess = 1.0f - roughness;
+    //float3 shadowFactor = 1.0f;
+    //shadowFactor = CalcShadowFactor(pin.ShadowPosH);
+
+    //float3 shadowFactor[NUM_DIR_LIGHTS + NUM_POINT_LIGHTS + NUM_SPOT_LIGHTS];
+    //for(int i = 0; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS + NUM_SPOT_LIGHTS; i++ )
+    //{
+    //    float4 shadowPosH = mul(float4(posW, 1.0f), gShadowTransforms[i]);
+    //    shadowFactor[i] = CalcShadowFactor(i, shadowPosH);
+    //}
+    float3 shadowFactor[3];
+    shadowFactor[0] = 1.0f;
+    shadowFactor[1] = 1.0f;
+    shadowFactor[2] = 1.0f;
+    float4 directLight = PBRShading(gLights, mat, normalW, toEyeW, posW, shadowFactor);
     float4 litColor = ambient + directLight;
 
     // Add in specular reflections.
@@ -56,9 +68,8 @@ float4 DeferredPS(VertexOutDeferred pin) : SV_Target
     float4 reflectionColor = gCubeMap.Sample(gsamLinearWrap, r);
     float3 f0 = lerp(0.04, albedo, metalness);
     float nov = max(dot(normalW, toEyeW), 0.001f);
-    float3 FresnelFactor = f0 + (1 - f0) * pow(1 - nov, 5);
-    litColor.xyz += FresnelFactor * reflectionColor.xyz;
-
-    litColor.a = 1.0;
+    float3 FresnelFactor = f0 + (1.0f - f0) * pow(1 - nov, 5);
+    
+    litColor.xyz += FresnelFactor * reflectionColor.xyz * (1 - roughness) * pbrDesc.normal.w;
     return litColor;
 }

@@ -48,6 +48,9 @@
     <ClCompile Include="CubeRenderTarget.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="ShadowMap.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common\Camera.h">
@@ -87,6 +90,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="CubeRenderTarget.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ShadowMap.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

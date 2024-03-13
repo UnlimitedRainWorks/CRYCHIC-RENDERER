@@ -140,6 +140,7 @@
     <ClCompile Include="CubeRenderTarget.cpp" />
     <ClCompile Include="DeferredRenderTarget.cpp" />
     <ClCompile Include="FrameResource.cpp" />
+    <ClCompile Include="ShadowMap.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common\Camera.h" />
@@ -155,6 +156,7 @@
     <ClInclude Include="CubeRenderTarget.h" />
     <ClInclude Include="DeferredRenderTarget.h" />
     <ClInclude Include="FrameResource.h" />
+    <ClInclude Include="ShadowMap.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

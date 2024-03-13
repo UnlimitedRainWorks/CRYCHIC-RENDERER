@@ -75,13 +75,15 @@ GBuffer GBufferPS(VertexOutGBuffer pin)
     int normalMapIndex = matData.NormalMapIndex;
 
     float3 normalT2W = normalW;
+    float4 normalSample = float4(normalW, 1.0f);
     if (normalMapIndex > 0)
     {
-        float3 normalT = gDiffuseMap[normalMapIndex].Sample(gsamAnisotropicWrap, pin.TexC).xyz;
+        normalSample = gDiffuseMap[normalMapIndex].Sample(gsamAnisotropicWrap, pin.TexC);
+        float3 normalT = normalSample.xyz;
         normalT2W = EncodeNormalTangentSpace2World(normalT, normalW, pin.TangentW);
     }
 	// Dynamically look up the texture in the array.
 	diffuseAlbedo *= gDiffuseMap[diffuseTexIndex].Sample(gsamLinearWrap, pin.TexC);
 
-    return EncodePBRToGBuffer(posW, metalness, diffuseAlbedo.xyz, normalT2W, roughness);
+    return EncodePBRToGBuffer(posW, metalness, diffuseAlbedo.xyz, float4(normalT2W, normalSample.w), roughness);
 }

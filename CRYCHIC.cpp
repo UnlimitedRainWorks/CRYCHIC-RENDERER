@@ -26,6 +26,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 CRYCHIC::CRYCHIC(HINSTANCE hInstance)
 	: D3DApp(hInstance)
 {
+	mSceneSphere.Center = XMFLOAT3(0.0f, 0.0f, 0.0f);
+	mSceneSphere.Radius = sqrtf(20.0f * 20.0f + 30.0f * 30.0f);
+	UpdateLights();
+	//mMainPassCB.Lights[0].Direction = { 0.57735f, -0.57735f, 0.57735f };
+	//mMainPassCB.Lights[0].Strength = { 2.8f, 2.8f, 2.8f };
 }
 
 CRYCHIC::~CRYCHIC()
@@ -51,6 +56,10 @@ bool CRYCHIC::Initialize()
 
 	mDynamicCubeMap = std::make_unique<CubeRenderTarget>(md3dDevice.Get(),
 		CubeMapSize, CubeMapSize, DXGI_FORMAT_R8G8B8A8_UNORM);
+
+	
+	mShadowMap = std::make_unique<ShadowMap>(md3dDevice.Get(),
+		2048, 2048, mShadowMapSize);
 
 	mCamera.SetPosition(0.0f, 2.0f, -15.0f);
 
@@ -94,8 +103,9 @@ void CRYCHIC::CreateRtvAndDsvDescriptorHeaps()
 		&rtvHeapDesc, IID_PPV_ARGS(mRtvHeap.GetAddressOf())));
 
 	// 为cubemap rt新增1个dsv
+	// for shadowpass add shadowmapsize dsv
 	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
-	dsvHeapDesc.NumDescriptors = 2;
+	dsvHeapDesc.NumDescriptors = 1 + 1 + mShadowMapSize;
 	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
 	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	dsvHeapDesc.NodeMask = 0;
@@ -135,10 +145,28 @@ void CRYCHIC::Update(const GameTimer& gt)
 		CloseHandle(eventHandle);
 	}
 
+	/*mLightRotationAngle += 0.01f * gt.DeltaTime();
+	mLightRotationAngle += 0.1f * gt.DeltaTime();
+	XMMATRIX R = XMMatrixRotationY(mLightRotationAngle);
+	// 这里直接旋转一个主光源
+	XMVECTOR lightDir = XMLoadFloat3(&mMainPassCB.Lights[0].Direction);
+	XMStoreFloat3(&mMainPassCB.Lights[0].Direction, XMVector3TransformNormal(lightDir, R));
+	for (int i = 0; i < 3; ++i)
+	{
+		XMVECTOR lightDir = XMLoadFloat3(&mBaseLightDirections[i]);
+		lightDir = XMVector3TransformNormal(lightDir, R);
+		XMStoreFloat3(&mRotatedLightDirections[i], lightDir);
+	}*/
+
 	AnimateMaterials(gt);
 	UpdateInstanceData(gt);
 	UpdateMaterialBuffer(gt);
+	//UpdateLights(gt);
+	UpdateDirShadowTransform(gt);
+	UpdateSpotShadowTransform(gt);
 	UpdateMainPassCB(gt);
+	UpdateCubeMapFacePassCBs();
+	UpdateShadowPassCB(gt);
 }
 
 void CRYCHIC::Draw(const GameTimer& gt)
@@ -162,14 +190,14 @@ void CRYCHIC::Draw(const GameTimer& gt)
 		auto matBuffer = mCurrFrameResource->MaterialBuffer->Resource();
 		mCommandList->SetGraphicsRootShaderResourceView(2, matBuffer->GetGPUVirtualAddress());
 
-		// Bind all the textures used in this scene.  Observe
-		// that we only have to specify the first descriptor in the table.  
-		// The root signature knows how many descriptors are expected in the table.
 		mCommandList->SetGraphicsRootDescriptorTable(3, mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+		
+		DrawSceneToShadowMap();
+
 		auto hDesciptor = CD3DX12_GPU_DESCRIPTOR_HANDLE(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart(), 
 			mCubeMapTexHeapIndex, mCbvSrvDescriptorSize);
 		mCommandList->SetGraphicsRootDescriptorTable(5, hDesciptor);
-
+		
 		DrawSceneToCubeMap();
 
 		mCommandList->SetPipelineState(mPSOs["gBuffer"].Get());
@@ -201,7 +229,6 @@ void CRYCHIC::Draw(const GameTimer& gt)
 
 		mCommandList->SetPipelineState(mPSOs["opaque"].Get());
 
-		//DrawSceneToCubeMap();
 		CD3DX12_GPU_DESCRIPTOR_HANDLE dynamicTexDescriptor(
 			mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 		dynamicTexDescriptor.Offset(mDynamicTexHeapIndex, mCbvSrvDescriptorSize);
@@ -253,16 +280,18 @@ void CRYCHIC::Draw(const GameTimer& gt)
 		auto matBuffer = mCurrFrameResource->MaterialBuffer->Resource();
 		mCommandList->SetGraphicsRootShaderResourceView(2, matBuffer->GetGPUVirtualAddress());
 
-		// bind dynamiccubemapTex for opaqueDynamicReflectors
+		mCommandList->SetGraphicsRootDescriptorTable(3, mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+		DrawSceneToShadowMap();
+
 		CD3DX12_GPU_DESCRIPTOR_HANDLE cubeMapTexDescriptor(
 			mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 		cubeMapTexDescriptor.Offset(mCubeMapTexHeapIndex, mCbvSrvDescriptorSize);
 		mCommandList->SetGraphicsRootDescriptorTable(5, cubeMapTexDescriptor);
 
-		mCommandList->SetGraphicsRootDescriptorTable(3, mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-
+		//mCommandList->SetPipelineState(mPSOs["opaque"].Get());
 		DrawSceneToCubeMap();
-
+		
 		mCommandList->RSSetViewports(1, &mScreenViewport);
 		mCommandList->RSSetScissorRects(1, &mScissorRect);
 
@@ -280,17 +309,22 @@ void CRYCHIC::Draw(const GameTimer& gt)
 		auto passCB = mCurrFrameResource->PassCB->Resource();
 		mCommandList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
 
-
 		// bind dynamiccubemapTex for opaqueDynamicReflectors
 		CD3DX12_GPU_DESCRIPTOR_HANDLE dynamicTexDescriptor(
 			mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 		dynamicTexDescriptor.Offset(mDynamicTexHeapIndex, mCbvSrvDescriptorSize);
 		mCommandList->SetGraphicsRootDescriptorTable(5, dynamicTexDescriptor);
+
+		mCommandList->SetPipelineState(mPSOs["opaque"].Get());
 		DrawRenderItems(mCommandList.Get(), mRitemLayer[int(RenderLayer::OpaqueDynamicReflectors)]);
 
 		mCommandList->SetGraphicsRootDescriptorTable(5, cubeMapTexDescriptor);
+		
 		DrawRenderItems(mCommandList.Get(), mRitemLayer[int(RenderLayer::Opaque)]);
 
+		//mCommandList->SetPipelineState(mPSOs["shadowDebug"].Get());
+		//DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Debug]);
+		//mCommandList->SetGraphicsRootDescriptorTable(5, cubeMapTexDescriptor);
 		mCommandList->SetPipelineState(mPSOs["sky"].Get());
 		DrawRenderItems(mCommandList.Get(), mRitemLayer[int(RenderLayer::Sky)]);
 
@@ -463,13 +497,28 @@ void CRYCHIC::UpdateMainPassCB(const GameTimer& gt)
 	XMMATRIX invView = XMMatrixInverse(&XMMatrixDeterminant(view), view);
 	XMMATRIX invProj = XMMatrixInverse(&XMMatrixDeterminant(proj), proj);
 	XMMATRIX invViewProj = XMMatrixInverse(&XMMatrixDeterminant(viewProj), viewProj);
-
+	
+	//XMMATRIX shadowTransform1 = XMLoadFloat4x4(&mShadowTransforms[0]);
+	//mMainPassCB.ShadowTransforms.resize(mShadowTransforms.size());
+	//for (int i = 0; i < mShadowTransforms.size(); i++)
+	//{
+	//	auto st = XMMatrixTranspose(XMLoadFloat4x4(&mShadowTransforms[i]));
+	//	XMStoreFloat4x4(&mMainPassCB.ShadowTransforms[i], XMMatrixTranspose(st));
+	//}
+	//mMainPassCB.ShadowTransforms.resize(1);
 	XMStoreFloat4x4(&mMainPassCB.View, XMMatrixTranspose(view));
 	XMStoreFloat4x4(&mMainPassCB.InvView, XMMatrixTranspose(invView));
 	XMStoreFloat4x4(&mMainPassCB.Proj, XMMatrixTranspose(proj));
 	XMStoreFloat4x4(&mMainPassCB.InvProj, XMMatrixTranspose(invProj));
 	XMStoreFloat4x4(&mMainPassCB.ViewProj, XMMatrixTranspose(viewProj));
 	XMStoreFloat4x4(&mMainPassCB.InvViewProj, XMMatrixTranspose(invViewProj));
+
+	for (size_t i = 0; i < mShadowMapSize; i++)
+	{
+		XMMATRIX shadowTransform = XMLoadFloat4x4(&mShadowTransforms[i]);
+		XMStoreFloat4x4(&mMainPassCB.ShadowTransforms[i], XMMatrixTranspose(shadowTransform));
+	}
+	
 	mMainPassCB.EyePosW = mCamera.GetPosition3f();
 	mMainPassCB.RenderTargetSize = XMFLOAT2((float)mClientWidth, (float)mClientHeight);
 	mMainPassCB.InvRenderTargetSize = XMFLOAT2(1.0f / mClientWidth, 1.0f / mClientHeight);
@@ -479,40 +528,47 @@ void CRYCHIC::UpdateMainPassCB(const GameTimer& gt)
 	mMainPassCB.DeltaTime = gt.DeltaTime();
 	mMainPassCB.AmbientLight = { 0.25f, 0.25f, 0.35f, 1.0f };
 
-	int dirLightsNum = 3;
-	int pointLightsNum = 0;
-	int spotLightsNum = 0;
-	// Directional Lights
-	mMainPassCB.Lights[0].Direction = { 0.57735f, -0.57735f, 0.57735f };
-	mMainPassCB.Lights[0].Strength = { 2.8f, 2.8f, 2.8f };
-	mMainPassCB.Lights[1].Direction = { -0.57735f, -0.57735f, 0.57735f };
-	mMainPassCB.Lights[1].Strength = { 0.4f, 0.4f, 0.4f };
-	mMainPassCB.Lights[2].Direction = { 0.0f, -0.707f, -0.707f };
-	mMainPassCB.Lights[2].Strength = { 0.2f, 0.2f, 0.2f };
+	//mMainPassCB.Lights[0].Direction = mBaseLightDirections[0];
+	//mMainPassCB.Lights[0].Strength = { 2.9f, 2.8f, 2.7f };
+	
+	//mMainPassCB.Lights[1].Direction = mBaseLightDirections[1];
+	//mMainPassCB.Lights[1].Strength = { 2.4f, 2.4f, 2.4f };
+	//mMainPassCB.Lights[2].Direction = mBaseLightDirections[2];
+	//mMainPassCB.Lights[2].Strength = { 2.2f, 2.2f, 2.2f };
 
-	// Point Lights
-	for (int i = dirLightsNum, j = 0; i < dirLightsNum + pointLightsNum; i++,j++)
-	{
-		mMainPassCB.Lights[i].Position = { -5.0f, 4.5f, -10.0f + j * 5.0f};
-		mMainPassCB.Lights[i].Strength = { 1.2f, 1.0f, 1.1f };
-		mMainPassCB.Lights[i].FalloffStart = 1.0f;
-		mMainPassCB.Lights[i].FalloffEnd = 8.0f;
-	}
+	//int dirLightsNum = 3;
+	//int pointLightsNum = 0;
+	//int spotLightsNum = 0;
+	////// Directional Lights
+	//////mMainPassCB.Lights[0].Direction = { 0.57735f, -0.57735f, 0.57735f };
+	////mMainPassCB.Lights[0].Strength = { 4.8f, 4.8f, 4.8f };
+	////mMainPassCB.Lights[1].Direction = { -0.57735f, -0.57735f, 0.57735f };
+	////mMainPassCB.Lights[1].Strength = { 0.4f, 0.4f, 0.4f };
+	////mMainPassCB.Lights[2].Direction = { 0.0f, -0.707f, -0.707f };
+	////mMainPassCB.Lights[2].Strength = { 0.2f, 0.2f, 0.2f };
+
+	//// Point Lights
+	//for (int i = dirLightsNum, j = 0; i < dirLightsNum + pointLightsNum; i++,j++)
+	//{
+	//	mMainPassCB.Lights[i].Position = { -5.0f, 4.5f, -10.0f + j * 5.0f};
+	//	mMainPassCB.Lights[i].Strength = { 1.2f, 1.0f, 1.1f };
+	//	mMainPassCB.Lights[i].FalloffStart = 1.0f;
+	//	mMainPassCB.Lights[i].FalloffEnd = 8.0f;
+	//}
 
 	// Spot Lights
-	for (int i = dirLightsNum + pointLightsNum, j = 0; i < dirLightsNum + pointLightsNum + spotLightsNum; i++, j++)
+	/*for (int i = dirLightsNum + pointLightsNum, j = 0; i < dirLightsNum + pointLightsNum + spotLightsNum; i++, j++)
 	{
-		mMainPassCB.Lights[i].Position = { 5.0f, 4.5f, -10.0f + j * 5.0f };
+		mMainPassCB.Lights[i].Position = { 4.0f, 4.5f, -10.0f + j * 5.0f };
 		mMainPassCB.Lights[i].Direction = { 0.0f, -1.0f, 0.0f };
-		mMainPassCB.Lights[i].Strength = { 1.2f, 1.1f, 1.0f };
+		mMainPassCB.Lights[i].Strength = { 100.2f, 2.1f, 2.0f };
 		mMainPassCB.Lights[i].FalloffStart = 1.0f;
 		mMainPassCB.Lights[i].FalloffEnd = 10.1f;
 		mMainPassCB.Lights[i].SpotPower = 8.0f;
-	}
+	}*/
 
 	auto currPassCB = mCurrFrameResource->PassCB.get();
 	currPassCB->CopyData(0, mMainPassCB);
-	UpdateCubeMapFacePassCBs();
 }
 
 void CRYCHIC::UpdateCubeMapFacePassCBs()
@@ -544,6 +600,196 @@ void CRYCHIC::UpdateCubeMapFacePassCBs()
 
 		// 0 is for mainpass , 1 - 6 for cubemapcamera
 		currPassCB->CopyData(1 + i, cubeFacePassCB);
+	}
+}
+
+void CRYCHIC::UpdateDirShadowTransform(const GameTimer& gt)
+{
+	XMVECTOR lightDir = XMLoadFloat3(&mBaseLightDirections[0]);
+	XMVECTOR lightPos = -2.0f * mSceneSphere.Radius * lightDir;
+	XMVECTOR targetPos = XMLoadFloat3(&mSceneSphere.Center);
+	XMVECTOR lightUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	XMMATRIX lightView = XMMatrixLookAtLH(lightPos, targetPos, lightUp);
+
+	XMStoreFloat3(&mLightPosW, lightPos);
+
+	// Transform bouding sphere to light space.
+	XMFLOAT3 sphereCenterLS;
+	XMStoreFloat3(&sphereCenterLS, XMVector3TransformCoord(targetPos, lightView));
+
+	float l = sphereCenterLS.x - mSceneSphere.Radius;
+	float b = sphereCenterLS.y - mSceneSphere.Radius;
+	float n = sphereCenterLS.z - mSceneSphere.Radius;
+	float r = sphereCenterLS.x + mSceneSphere.Radius;
+	float t = sphereCenterLS.y + mSceneSphere.Radius;
+	float f = sphereCenterLS.z + mSceneSphere.Radius;
+
+	mLightNearZ = n;
+	mLightFarZ = f;
+	XMMATRIX lightProj = XMMatrixOrthographicOffCenterLH(l, r, b, t, n, f);
+
+	XMMATRIX T(
+		0.5f, 0.0f, 0.0f, 0.0f,
+		0.0f, -0.5f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.5f, 0.5f, 0.0f, 1.0f);
+	XMMATRIX S = lightView * lightProj * T;
+	XMStoreFloat4x4(&mLightView, lightView);
+	XMStoreFloat4x4(&mLightProj, lightProj);
+	XMStoreFloat4x4(&mShadowTransform, S);
+	XMStoreFloat4x4(&mLightViews[0], lightView);
+	XMStoreFloat4x4(&mLightProjs[0], lightProj);
+	XMStoreFloat4x4(&mShadowTransforms[0], S);
+}
+
+void CRYCHIC::UpdateSpotShadowTransform(const GameTimer& gt)
+{
+	for (size_t i = 0; i < spotLightsNum; i++)
+	{
+		XMVECTOR lightDir = XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f);
+		XMVECTOR lightPos = XMLoadFloat3(&mMainPassCB.Lights[dirLightsNum + pointLightsNum + i].Position);
+		XMVECTOR targetPos = { 5.0f, 0.0f, -10.0f + i * 5.0f };
+		XMVECTOR lightUp = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+		XMMATRIX lightView = XMMatrixLookAtLH(lightPos, targetPos, lightUp);
+
+		XMStoreFloat3(&mLightPosW, lightPos);
+
+		// Transform bouding sphere to light space.
+		//XMFLOAT3 sphereCenterLS;
+		//XMStoreFloat3(&sphereCenterLS, XMVector3TransformCoord(targetPos, lightView));
+
+		//float l = sphereCenterLS.x - mSceneSphere.Radius;
+		//float b = sphereCenterLS.y - mSceneSphere.Radius;
+		//float n = sphereCenterLS.z - mSceneSphere.Radius;
+		//float r = sphereCenterLS.x + mSceneSphere.Radius;
+		//float t = sphereCenterLS.y + mSceneSphere.Radius;
+		//float f = sphereCenterLS.z + mSceneSphere.Radius;
+
+		//mLightNearZ = n;
+		//mLightFarZ = f;
+		//XMMATRIX lightProj = XMMatrixOrthographicOffCenterLH(l, r, b, t, n, f);
+		XMMATRIX lightProj = XMMatrixPerspectiveFovLH(0.5f * XM_PI, 1.0f, 0.1f, 3.5f);
+
+		XMMATRIX T(
+			0.5f, 0.0f, 0.0f, 0.0f,
+			0.0f, -0.5f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f,
+			0.5f, 0.5f, 0.0f, 1.0f);
+		XMMATRIX S = lightView * lightProj * T;
+		
+		// 主平行光光源投射阴影，这里dirnum = 1
+		XMStoreFloat4x4(&mLightViews[1 + pointLightsNum + i], lightView);
+		XMStoreFloat4x4(&mLightProjs[1 + pointLightsNum + i], lightProj);
+		XMStoreFloat4x4(&mShadowTransforms[1 + pointLightsNum + i], S);
+	}
+}
+
+void CRYCHIC::UpdateShadowPassCB(const GameTimer& gt)
+{
+	for (size_t i = 0; i < dirLightsNum + pointLightsNum + spotLightsNum; i++)
+	{
+		XMMATRIX view = XMLoadFloat4x4(&mLightViews[i]);
+		XMMATRIX proj = XMLoadFloat4x4(&mLightProjs[i]);
+
+		XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+		XMMATRIX invView = XMMatrixInverse(&XMMatrixDeterminant(view), view);
+		XMMATRIX invProj = XMMatrixInverse(&XMMatrixDeterminant(proj), proj);
+		XMMATRIX invViewProj = XMMatrixMultiply(invProj, invView);
+
+		UINT w = mShadowMap->Width();
+		UINT h = mShadowMap->Height();
+
+		XMStoreFloat4x4(&mShadowPassCB.View, XMMatrixTranspose(view));
+		XMStoreFloat4x4(&mShadowPassCB.Proj, XMMatrixTranspose(proj));
+		XMStoreFloat4x4(&mShadowPassCB.InvView, XMMatrixTranspose(invView));
+		XMStoreFloat4x4(&mShadowPassCB.InvProj, XMMatrixTranspose(invProj));
+		XMStoreFloat4x4(&mShadowPassCB.ViewProj, XMMatrixTranspose(viewProj));
+		XMStoreFloat4x4(&mShadowPassCB.InvViewProj, XMMatrixTranspose(invViewProj));
+
+		mShadowPassCB.EyePosW = mLightPosW;
+		mShadowPassCB.RenderTargetSize = XMFLOAT2((float)w, (float)h);
+		mShadowPassCB.InvRenderTargetSize = XMFLOAT2(1.0f / w, 1.0f / h);
+		mShadowPassCB.NearZ = mLightNearZ;
+		mShadowPassCB.FarZ = mLightFarZ;
+
+		auto currPassCB = mCurrFrameResource->PassCB.get();
+		currPassCB->CopyData(1 + mDynamicCubemapSize * 6 + i, mShadowPassCB);
+	}
+}
+
+// 设置灯光信息
+void CRYCHIC::UpdateLights()
+{
+	// Directional Lights
+	mMainPassCB.Lights[0].Direction = mBaseLightDirections[0];
+	mMainPassCB.Lights[0].Strength = { 2.9f, 2.8f, 2.7f };
+	//mMainPassCB.Lights[1].Direction = mBaseLightDirections[1];
+	//mMainPassCB.Lights[1].Strength = { 2.4f, 2.4f, 2.4f };
+	//mMainPassCB.Lights[2].Direction = mBaseLightDirections[2];
+	//mMainPassCB.Lights[2].Strength = { 2.2f, 2.2f, 2.2f };
+
+	// 平行光设置为只有主光源产生阴影
+	mShadowMapSize = 1 + pointLightsNum + spotLightsNum;
+	// Point Lights
+	// 透视投影矩阵、cubemap式的shadowmap
+	for (int i = dirLightsNum, j = 0; i < dirLightsNum + pointLightsNum; i++, j++)
+	{
+		mMainPassCB.Lights[i].Position = { -5.0f, 4.5f, -10.0f + j * 5.0f };
+		mMainPassCB.Lights[i].Strength = { 1.2f, 1.0f, 1.1f };
+		mMainPassCB.Lights[i].FalloffStart = 1.0f;
+		mMainPassCB.Lights[i].FalloffEnd = 8.0f;
+	}
+
+	// Spot Lights
+	mMainPassCB.Lights[1].Position = { 4.0f, 3.5f, -10.0f };
+	mMainPassCB.Lights[1].Direction = { 0.0f, -1.0f, 0.0f };
+	mMainPassCB.Lights[1].Strength = { 10.2f, 10.1f, 10.0f };
+	mMainPassCB.Lights[1].FalloffStart = 1.0f;
+	mMainPassCB.Lights[1].FalloffEnd = 10.1f;
+	mMainPassCB.Lights[1].SpotPower = 8.0f;
+	
+	mMainPassCB.Lights[2].Position = { 2.0f, 7.5f, 0.0f };
+	mMainPassCB.Lights[2].Direction = { 0.0f, -1.0f, 0.0f };
+	mMainPassCB.Lights[2].Strength = { 10.2f, 10.1f, 10.0f };
+	mMainPassCB.Lights[2].FalloffStart = 1.0f;
+	mMainPassCB.Lights[2].FalloffEnd = 30.1f;
+	mMainPassCB.Lights[2].SpotPower = 8.0f;
+
+}
+
+// 设置灯光信息
+void CRYCHIC::UpdateLights(const GameTimer& gt)
+{
+	// Directional Lights
+	mMainPassCB.Lights[0].Direction = mBaseLightDirections[0];
+	mMainPassCB.Lights[0].Strength = { 2.9f, 2.8f, 2.7f };
+	mMainPassCB.Lights[1].Direction = mBaseLightDirections[1];
+	mMainPassCB.Lights[1].Strength = { 2.4f, 2.4f, 2.4f };
+	mMainPassCB.Lights[2].Direction = mBaseLightDirections[2];
+	mMainPassCB.Lights[2].Strength = { 2.2f, 2.2f, 2.2f };
+
+	// 平行光设置为只有主光源产生阴影
+	mShadowMapSize = 1 + pointLightsNum + spotLightsNum;
+
+	// Point Lights
+	// 透视投影矩阵、cubemap式的shadowmap
+	for (int i = dirLightsNum, j = 0; i < dirLightsNum + pointLightsNum; i++, j++)
+	{
+		mMainPassCB.Lights[i].Position = { -5.0f, 4.5f, -10.0f + j * 5.0f };
+		mMainPassCB.Lights[i].Strength = { 1.2f, 1.0f, 1.1f };
+		mMainPassCB.Lights[i].FalloffStart = 1.0f;
+		mMainPassCB.Lights[i].FalloffEnd = 8.0f;
+	}
+
+	// Spot Lights
+	for (int i = dirLightsNum + pointLightsNum, j = 0; i < dirLightsNum + pointLightsNum + spotLightsNum; i++, j++)
+	{
+		mMainPassCB.Lights[i].Position = { 5.0f, 4.5f, -10.0f + j * 5.0f };
+		mMainPassCB.Lights[i].Direction = { 0.0f, -1.0f, 0.0f };
+		mMainPassCB.Lights[i].Strength = { 1.2f, 1.1f, 1.0f };
+		mMainPassCB.Lights[i].FalloffStart = 1.0f;
+		mMainPassCB.Lights[i].FalloffEnd = 10.1f;
+		mMainPassCB.Lights[i].SpotPower = 8.0f;
 	}
 }
 
@@ -592,6 +838,7 @@ void CRYCHIC::LoadTextures()
 		"crateTex",
 		"crate02Tex",
 		"flareTex",
+		"flareNormalTex",
 		"iceTex",
 		"defaultTex",
 		"defaultNormalTex"
@@ -611,6 +858,7 @@ void CRYCHIC::LoadTextures()
 		L"Textures/WoodCrate01.dds",
 		L"Textures/WoodCrate02.dds",
 		L"Textures/flare.dds",
+		L"Textures/flare_NRM.dds",
 		L"Textures/ice.dds",
 		L"Textures/white1x1.dds",
 		L"Textures/default_nmap.dds",
@@ -652,13 +900,13 @@ void CRYCHIC::LoadTextures()
 void CRYCHIC::BuildRootSignature()
 {
 	CD3DX12_DESCRIPTOR_RANGE texTable;
-	texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, mTexSize, 0, 0);
+	texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, mTexSize + mShadowMapSize, 0, 0);
 
 	CD3DX12_DESCRIPTOR_RANGE cubeMapTable;
-	cubeMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, mCubemapSize, mTexSize, 0);
+	cubeMapTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, mCubemapSize, mTexSize + mShadowMapSize, 0);
 
 	CD3DX12_DESCRIPTOR_RANGE gBufferTable;
-	gBufferTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, mTexSize + mCubemapSize, 0);
+	gBufferTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, mTexSize + mCubemapSize + mShadowMapSize, 0);
 
 	// Root parameter can be a table, root descriptor or root constants.
 	CD3DX12_ROOT_PARAMETER slotRootParameter[6];
@@ -675,7 +923,7 @@ void CRYCHIC::BuildRootSignature()
 	slotRootParameter[3].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
 	// bind gbuffers descriptor table
 	slotRootParameter[4].InitAsDescriptorTable(1, &gBufferTable, D3D12_SHADER_VISIBILITY_PIXEL);
-	// cubemap descriptor table
+	// cubemap/shadowmap descriptor table
 	slotRootParameter[5].InitAsDescriptorTable(1, &cubeMapTable, D3D12_SHADER_VISIBILITY_PIXEL);
 
 	auto staticSamplers = GetStaticSamplers();
@@ -710,15 +958,20 @@ void CRYCHIC::BuildDescriptorHeaps()
 	// Create the SRV heap.
 	//
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = mTexSize + mGBufferSize + mCubemapSize + mDynamicCubemapSize;
+	srvHeapDesc.NumDescriptors = mTexSize + mShadowMapSize + mCubemapSize + mDynamicCubemapSize+ mGBufferSize;
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
 
-	//
-	// Fill out the heap with actual descriptors.
-	//
-	CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor(mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	auto srvCpuStart = mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	auto srvGpuStart = mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+	auto rtvCpuStart = mRtvHeap->GetCPUDescriptorHandleForHeapStart();
+	auto dsvCpuStart = mDsvHeap->GetCPUDescriptorHandleForHeapStart();
+
+	mShadowMapHeapIndex = mTexSize;
+	mCubeMapTexHeapIndex = mShadowMapHeapIndex + mShadowMapSize;
+	mDynamicTexHeapIndex = mCubeMapTexHeapIndex + mCubemapSize;
+	gBufferHeapIndex = mDynamicTexHeapIndex + mDynamicCubemapSize;
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -733,9 +986,14 @@ void CRYCHIC::BuildDescriptorHeaps()
 		auto tex = mTextures[texName]->Resource;
 		srvDesc.Format = tex->GetDesc().Format;
 		srvDesc.Texture2D.MipLevels = tex->GetDesc().MipLevels;
-		md3dDevice->CreateShaderResourceView(tex.Get(), &srvDesc, hDescriptor);
-		hDescriptor.Offset(1, mCbvSrvDescriptorSize);
+		md3dDevice->CreateShaderResourceView(tex.Get(), &srvDesc,
+			CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, i, mCbvSrvDescriptorSize));
 	}
+
+	mShadowMap->BuildDescriptors(
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mShadowMapHeapIndex, mCbvSrvDescriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mShadowMapHeapIndex, mCbvSrvDescriptorSize),
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(dsvCpuStart, 2, mDsvDescriptorSize));
 
 	for (int i = 0; i < cubeMapNames.size(); i++)
 	{
@@ -746,17 +1004,9 @@ void CRYCHIC::BuildDescriptorHeaps()
 		srvDesc.TextureCube.MipLevels = cubeMap->GetDesc().MipLevels;
 		srvDesc.TextureCube.MostDetailedMip = 0;
 		srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
-		md3dDevice->CreateShaderResourceView(cubeMap.Get(), &srvDesc, hDescriptor);
-		hDescriptor.Offset(1, mCbvSrvDescriptorSize);
+		md3dDevice->CreateShaderResourceView(cubeMap.Get(), &srvDesc, 
+			CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, i + mCubeMapTexHeapIndex, mCbvSrvDescriptorSize));
 	}
-
-	mCubeMapTexHeapIndex = mTexSize;
-	mDynamicTexHeapIndex = mCubeMapTexHeapIndex + mCubemapSize;
-	gBufferHeapIndex = mDynamicTexHeapIndex + mDynamicCubemapSize;
-
-	auto srvCpuStart = mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	auto srvGpuStart = mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-	auto rtvCpuStart = mRtvHeap->GetCPUDescriptorHandleForHeapStart();
 
 	// cubemap RTV goes after the swap chain descriptors.
 	int rtvOffset = SwapChainBufferCount;
@@ -770,10 +1020,8 @@ void CRYCHIC::BuildDescriptorHeaps()
 	mDynamicCubeMap->BuildDescriptors(
 		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mDynamicTexHeapIndex, mCbvSrvDescriptorSize),
 		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mDynamicTexHeapIndex, mCbvSrvDescriptorSize),
-		cubeRtvHandles
-	);
-
-
+		cubeRtvHandles);
+	
 	CD3DX12_CPU_DESCRIPTOR_HANDLE gBufferRtvHandles;
 	gBufferRtvHandles = CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvCpuStart, rtvOffset + mCubemapSize * mCubemapRTSize, mRtvDescriptorSize);
 
@@ -800,7 +1048,11 @@ void CRYCHIC::BuildShadersAndInputLayout()
 	mShaders["deferredShadingPS"] = d3dUtil::CompileShader(L"Shaders\\DeferredShading.hlsl", nullptr, "DeferredPS", "ps_5_1");
 	mShaders["skyVS"] = d3dUtil::CompileShader(L"Shaders\\sky.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["skyPS"] = d3dUtil::CompileShader(L"Shaders\\sky.hlsl", nullptr, "PS", "ps_5_1");
-
+	mShaders["shadowMappingVS"] = d3dUtil::CompileShader(L"Shaders\\Shadows.hlsl", nullptr, "shadowVS", "vs_5_1");
+	mShaders["shadowMappingPS"] = d3dUtil::CompileShader(L"Shaders\\Shadows.hlsl", nullptr, "shadowPS", "ps_5_1");
+	mShaders["shadowDebugVS"] = d3dUtil::CompileShader(L"Shaders\\ShadowsDebug.hlsl", nullptr, "shadowDebugVS", "vs_5_1");
+	mShaders["shadowDebugPS"] = d3dUtil::CompileShader(L"Shaders\\ShadowsDebug.hlsl", nullptr, "shadowDebugPS", "ps_5_1");
+	
 	mInputLayout =
 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -817,6 +1069,7 @@ void CRYCHIC::BuildShapeGeometry()
 	GeometryGenerator::MeshData grid = geoGen.CreateGrid(20.0f, 30.0f, 60, 40);
 	GeometryGenerator::MeshData sphere = geoGen.CreateSphere(0.5f, 20, 20);
 	GeometryGenerator::MeshData cylinder = geoGen.CreateCylinder(0.5f, 0.3f, 3.0f, 20, 20);
+	GeometryGenerator::MeshData quad = geoGen.CreateQuad(0.0f, 0.0f, 1.0f, 1.0f, 0.0f);
 
 	//
 	// We are concatenating all the geometry into one big vertex/index buffer.  So
@@ -828,12 +1081,14 @@ void CRYCHIC::BuildShapeGeometry()
 	UINT gridVertexOffset = (UINT)box.Vertices.size();
 	UINT sphereVertexOffset = gridVertexOffset + (UINT)grid.Vertices.size();
 	UINT cylinderVertexOffset = sphereVertexOffset + (UINT)sphere.Vertices.size();
+	UINT quadVertexOffset = cylinderVertexOffset + (UINT)quad.Vertices.size();
 
 	// Cache the starting index for each object in the concatenated index buffer.
 	UINT boxIndexOffset = 0;
 	UINT gridIndexOffset = (UINT)box.Indices32.size();
 	UINT sphereIndexOffset = gridIndexOffset + (UINT)grid.Indices32.size();
 	UINT cylinderIndexOffset = sphereIndexOffset + (UINT)sphere.Indices32.size();
+	UINT quadIndexOffset = cylinderIndexOffset + (UINT)quad.Indices32.size();
 
 	SubmeshGeometry boxSubmesh;
 	boxSubmesh.IndexCount = (UINT)box.Indices32.size();
@@ -855,6 +1110,11 @@ void CRYCHIC::BuildShapeGeometry()
 	cylinderSubmesh.StartIndexLocation = cylinderIndexOffset;
 	cylinderSubmesh.BaseVertexLocation = cylinderVertexOffset;
 
+	SubmeshGeometry quadSubmesh;
+	quadSubmesh.IndexCount = (UINT)quad.Indices32.size();
+	quadSubmesh.StartIndexLocation = quadIndexOffset;
+	quadSubmesh.BaseVertexLocation = quadVertexOffset;
+
 	//
 	// Extract the vertex elements we are interested in and pack the
 	// vertices of all the meshes into one vertex buffer.
@@ -864,7 +1124,8 @@ void CRYCHIC::BuildShapeGeometry()
 		box.Vertices.size() +
 		grid.Vertices.size() +
 		sphere.Vertices.size() +
-		cylinder.Vertices.size();
+		cylinder.Vertices.size() +
+		quad.Vertices.size();
 
 	std::vector<Vertex> vertices(totalVertexCount);
 	std::vector<std::uint16_t> indices;
@@ -942,10 +1203,26 @@ void CRYCHIC::BuildShapeGeometry()
 	XMStoreFloat3(&bounds.Extents, 0.5f * (vMax - vMin));
 	cylinderSubmesh.Bounds = bounds;
 	
+	vMin = XMLoadFloat3(&vMinf3);
+	vMax = XMLoadFloat3(&vMaxf3);
+	for (size_t i = 0; i < quad.Vertices.size(); i++, k++)
+	{
+		vertices[k].Pos = quad.Vertices[i].Position;
+		vertices[k].Normal = quad.Vertices[i].Normal;
+		vertices[k].TexC = quad.Vertices[i].TexC;
+		XMVECTOR P = XMLoadFloat3(&vertices[k].Pos);
+		vMin = XMVectorMin(vMin, P);
+		vMax = XMVectorMax(vMax, P);
+	}
+	XMStoreFloat3(&bounds.Center, 0.5f * (vMin + vMax));
+	XMStoreFloat3(&bounds.Extents, 0.5f * (vMax - vMin));
+	quadSubmesh.Bounds = bounds;
+
 	indices.insert(indices.end(), std::begin(box.GetIndices16()), std::end(box.GetIndices16()));
 	indices.insert(indices.end(), std::begin(grid.GetIndices16()), std::end(grid.GetIndices16()));
 	indices.insert(indices.end(), std::begin(sphere.GetIndices16()), std::end(sphere.GetIndices16()));
 	indices.insert(indices.end(), std::begin(cylinder.GetIndices16()), std::end(cylinder.GetIndices16()));
+	indices.insert(indices.end(), std::begin(quad.GetIndices16()), std::end(quad.GetIndices16()));
 
 	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
 	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
@@ -974,6 +1251,7 @@ void CRYCHIC::BuildShapeGeometry()
 	geo->DrawArgs["grid"] = gridSubmesh;
 	geo->DrawArgs["sphere"] = sphereSubmesh;
 	geo->DrawArgs["cylinder"] = cylinderSubmesh;
+	geo->DrawArgs["quad"] = quadSubmesh;
 
 	mGeometries[geo->Name] = std::move(geo);
 }
@@ -1190,6 +1468,46 @@ void CRYCHIC::BuildPSOs()
 	skyPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 	skyPsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&skyPsoDesc, IID_PPV_ARGS(&mPSOs["sky"])));
+
+	//
+	// PSO for shadow mapping pass.
+	//
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC shadowMapPsoDesc = opaquePsoDesc;
+	shadowMapPsoDesc.RasterizerState.DepthBias = 100000;
+	shadowMapPsoDesc.RasterizerState.DepthBiasClamp = 0.0f;
+	shadowMapPsoDesc.RasterizerState.SlopeScaledDepthBias = 1.0f;
+	shadowMapPsoDesc.pRootSignature = mRootSignature.Get();
+	shadowMapPsoDesc.VS =
+	{
+	reinterpret_cast<BYTE*>(mShaders["shadowMappingVS"]->GetBufferPointer()),
+	mShaders["shadowMappingVS"]->GetBufferSize()
+	};
+	shadowMapPsoDesc.PS =
+	{
+	reinterpret_cast<BYTE*>(mShaders["shadowMappingPS"]->GetBufferPointer()),
+	mShaders["shadowMappingPS"]->GetBufferSize()
+	};
+	shadowMapPsoDesc.RTVFormats[0] = DXGI_FORMAT_UNKNOWN;
+	shadowMapPsoDesc.NumRenderTargets = 0;
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&shadowMapPsoDesc, IID_PPV_ARGS(&mPSOs["shadowMapping"])));
+
+	//
+	// PSO for debug layer.
+	//
+	auto shadowDebugPsoDesc = opaquePsoDesc;
+	shadowDebugPsoDesc.pRootSignature = mRootSignature.Get();
+	shadowDebugPsoDesc.VS = 
+	{
+	reinterpret_cast<BYTE*>(mShaders["shadowDebugVS"]->GetBufferPointer()),
+	mShaders["shadowDebugVS"]->GetBufferSize()
+	};
+	shadowDebugPsoDesc.PS = 
+	{
+	reinterpret_cast<BYTE*>(mShaders["shadowDebugPS"]->GetBufferPointer()),
+	mShaders["shadowDebugPS"]->GetBufferSize()
+	};
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&shadowDebugPsoDesc, IID_PPV_ARGS(&mPSOs["shadowDebug"])));
+
 }
 
 void CRYCHIC::BuildFrameResources()
@@ -1197,7 +1515,7 @@ void CRYCHIC::BuildFrameResources()
 	for (int i = 0; i < gNumFrameResources; ++i)
 	{
 		mFrameResources.push_back(std::make_unique<FrameResource>(md3dDevice.Get(),
-			1 + mCubemapRTSize, mInstancesCount, mAllRitems.size(), (UINT)mMaterials.size()));
+			1 + mCubemapRTSize + mShadowMapSize, mInstancesCount, mAllRitems.size(), (UINT)mMaterials.size()));
 	}
 }
 
@@ -1211,7 +1529,7 @@ void CRYCHIC::BuildMaterials()
 	bricks0->NormalSrvHeapIndex = 1;
 	bricks0->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	bricks0->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
-	bricks0->Roughness = 0.3f;
+	bricks0->Roughness = 0.5f;
 	bricks0->Metalness = 0.3f;
 
 	// mat1
@@ -1231,7 +1549,7 @@ void CRYCHIC::BuildMaterials()
 	tile0->NormalSrvHeapIndex = 4;
 	tile0->DiffuseAlbedo = XMFLOAT4(0.9f, 0.9f, 0.9f, 1.0f);
 	tile0->FresnelR0 = XMFLOAT3(0.2f, 0.2f, 0.2f);
-	tile0->Roughness = 0.1f;
+	tile0->Roughness = 0.5f;
 	tile0->Metalness = 0.2f;
 
 	// mat3
@@ -1257,6 +1575,7 @@ void CRYCHIC::BuildMaterials()
 	flare->Name = "flare";
 	flare->MatCBIndex = 5;
 	flare->DiffuseSrvHeapIndex = 7;
+	flare->NormalSrvHeapIndex = 8;
 	flare->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	flare->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	flare->Roughness = 0.2f;
@@ -1266,7 +1585,7 @@ void CRYCHIC::BuildMaterials()
 	auto ice = std::make_unique<Material>();
 	ice->Name = "ice";
 	ice->MatCBIndex = 6;
-	ice->DiffuseSrvHeapIndex = 8;
+	ice->DiffuseSrvHeapIndex = 9;
 	ice->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	ice->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	ice->Roughness = 0.2f;
@@ -1275,8 +1594,8 @@ void CRYCHIC::BuildMaterials()
 	auto default = std::make_unique<Material>();
 	default->Name = "default";
 	default->MatCBIndex = 7;
-	default->DiffuseSrvHeapIndex = 9;
-	default->NormalSrvHeapIndex = 10;
+	default->DiffuseSrvHeapIndex = 10;
+	default->NormalSrvHeapIndex = 11;
 	default->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	default->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	default->Roughness = 0.1f;
@@ -1285,8 +1604,8 @@ void CRYCHIC::BuildMaterials()
 	auto mirror = std::make_unique<Material>();
 	mirror->Name = "mirror";
 	mirror->MatCBIndex = 8;
-	mirror->DiffuseSrvHeapIndex = 9;
-	mirror->NormalSrvHeapIndex = 10;
+	mirror->DiffuseSrvHeapIndex = 10;
+	mirror->NormalSrvHeapIndex = 11;
 	mirror->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	mirror->FresnelR0 = XMFLOAT3(0.95f, 0.95f, 0.95f);
 	mirror->Roughness = 0.1f;
@@ -1542,8 +1861,27 @@ void CRYCHIC::BuildRenderItems()
 	globeRitem->Instances[0].MaterialIndex = 8; // mirror
 
 	mRitemLayer[(int)RenderLayer::OpaqueDynamicReflectors].push_back(globeRitem.get());
-	//mCubeMapAllRitems.push_back(std::make_unique<RenderItem>(*globeRitem));
 	mAllRitems.push_back(std::move(globeRitem));
+
+	// shadow debug quad
+	auto quadRitem = std::make_unique<RenderItem>();
+	quadRitem->itemIndex = mItemIndex++;
+	quadRitem->Geo = mGeometries["shapeGeo"].get();
+	quadRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	quadRitem->IndexCount = quadRitem->Geo->DrawArgs["quad"].IndexCount;
+	quadRitem->StartIndexLocation = quadRitem->Geo->DrawArgs["quad"].StartIndexLocation;
+	quadRitem->BaseVertexLocation = quadRitem->Geo->DrawArgs["quad"].BaseVertexLocation;
+	quadRitem->Bounds = quadRitem->Geo->DrawArgs["quad"].Bounds;
+
+	UINT quadInstaceCount = 1;
+	quadRitem->InstanceCount = quadInstaceCount;
+	mInstancesCount.push_back(quadInstaceCount);
+	quadRitem->Instances.resize(quadInstaceCount);
+	XMStoreFloat4x4(&quadRitem->Instances[0].World, XMMatrixScaling(1.0f, 1.0f, 1.0f));
+	XMStoreFloat4x4(&quadRitem->Instances[0].TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
+	quadRitem->Instances[0].MaterialIndex = 8; // shadowdebug
+	mRitemLayer[(int)RenderLayer::Debug].push_back(quadRitem.get());
+	mAllRitems.push_back(std::move(quadRitem));
 }
 
 void CRYCHIC::BuildCubeMapRenderItems()
@@ -1877,6 +2215,7 @@ void CRYCHIC::DrawGBuffer()
 
 void CRYCHIC::DrawSceneToCubeMap()
 {
+	mCommandList->SetPipelineState(mPSOs["opaque"].Get());
 	mCommandList->RSSetViewports(1, &mDynamicCubeMap->Viewport());
 	mCommandList->RSSetScissorRects(1, &mDynamicCubeMap->ScissorRect());
 
@@ -1888,7 +2227,7 @@ void CRYCHIC::DrawSceneToCubeMap()
 	for (int i = 0; i < mCubemapRTSize; i++)
 	{
 		// clear the back buffer and depth buffer
-		mCommandList->ClearRenderTargetView(mDynamicCubeMap->Rtv(i), Colors::LightSteelBlue, 0, nullptr);
+		mCommandList->ClearRenderTargetView(mDynamicCubeMap->Rtv(i), Colors::Black, 0, nullptr);
 		mCommandList->ClearDepthStencilView(mCubeDSV, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 		
 		// specify the render target
@@ -1904,6 +2243,34 @@ void CRYCHIC::DrawSceneToCubeMap()
 	}
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mDynamicCubeMap->Resource(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
+}
+
+void CRYCHIC::DrawSceneToShadowMap()
+{
+	mCommandList->SetPipelineState(mPSOs["shadowMapping"].Get());
+	for (size_t i = 0; i < mShadowMapSize; i++)
+	{
+		mCommandList->RSSetViewports(1, &mShadowMap->Viewport());
+		mCommandList->RSSetScissorRects(1, &mShadowMap->ScissorRect());
+
+		mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mShadowMap->Resource(i),
+			D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE));
+
+		UINT passCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(PassConstants));
+
+		mCommandList->ClearDepthStencilView(mShadowMap->Dsv(i),
+			D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+
+		mCommandList->OMSetRenderTargets(0, nullptr, false, &mShadowMap->Dsv(i));
+
+		auto passCB = mCurrFrameResource->PassCB->Resource();
+		D3D12_GPU_VIRTUAL_ADDRESS passCBAddress = passCB->GetGPUVirtualAddress() + (1 + mDynamicCubemapSize * 6 + i) * passCBByteSize;
+		mCommandList->SetGraphicsRootConstantBufferView(1, passCBAddress);
+		// shadowmapping
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::OpaqueDynamicCamera]);
+		mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mShadowMap->Resource(i),
+			D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_GENERIC_READ));
+	}
 }
 
 void CRYCHIC::BuildCubeDepthStencil()
@@ -1942,7 +2309,7 @@ void CRYCHIC::BuildCubeDepthStencil()
 		D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_DEPTH_WRITE));
 }
 
-std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> CRYCHIC::GetStaticSamplers()
+std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> CRYCHIC::GetStaticSamplers()
 {
 	// Applications usually only need a handful of samplers.  So just define them all up front
 	// and keep them available as part of the root signature.  
@@ -1993,9 +2360,21 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> CRYCHIC::GetStaticSamplers()
 		0.0f,                              // mipLODBias
 		8);                                // maxAnisotropy
 
+	const CD3DX12_STATIC_SAMPLER_DESC shadow(
+		6, // shaderRegister
+		D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_BORDER,  // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_BORDER,  // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_BORDER,  // addressW
+		0.0f,                               // mipLODBias
+		16,                                 // maxAnisotropy
+		D3D12_COMPARISON_FUNC_LESS_EQUAL,
+		D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK);
+
 	return {
 		pointWrap, pointClamp,
 		linearWrap, linearClamp,
-		anisotropicWrap, anisotropicClamp };
+		anisotropicWrap, anisotropicClamp,
+		shadow };
 }
 

@@ -13,19 +13,19 @@ struct PBRDesc
     float metalness;
     float3 albedo;
     float roughness;
-    float3 normal;
+    float4 normal;
 };
 
 //---------------------------------------------------------------------------------------
 // Transfer PBR information to GBuffer
 //---------------------------------------------------------------------------------------
 GBuffer EncodePBRToGBuffer(float3 pos,float metalness, 
-						   float3 albedo, float3 normal, float roughness)
+						   float3 albedo, float4 normal, float roughness)
 {
 	GBuffer gout;
 	gout.GBuffer0 = float4(pos, metalness);
 	gout.GBuffer1 = float4(albedo, roughness);
-	gout.GBuffer2 = float4(normal, 1.0);
+	gout.GBuffer2 = float4(normal);
 	gout.GBuffer3 = 0.0f;
 	return gout;
 }
@@ -37,6 +37,6 @@ PBRDesc DecodeGBuffer(float4 gBuffer0, float4 gBuffer1, float4 gBuffer2, float4 
 	pbrDesc.metalness = gBuffer0.w;
 	pbrDesc.albedo = gBuffer1.xyz;
 	pbrDesc.roughness = gBuffer1.w;
-	pbrDesc.normal = normalize(gBuffer2.xyz);
+	pbrDesc.normal = float4(normalize(gBuffer2.xyz), gBuffer2.w);
 	return pbrDesc;
 }

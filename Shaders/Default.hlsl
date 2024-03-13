@@ -14,7 +14,8 @@ struct VertexIn
 struct VertexOut
 {
 	float4 PosH    : SV_POSITION;
-    float3 PosW    : POSITION;
+    float4 PosW    : POSITION;
+    //float4 ShadowPosH : POSITION1;
     float3 NormalW : NORMAL;
 	float2 TexC    : TEXCOORD;
     float3 TangentW : TANGENT;
@@ -38,7 +39,7 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
 	
     // Transform to world space.
     float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
-    vout.PosW = posW.xyz;
+    vout.PosW = posW;
 
     // Assumes nonuniform scaling; otherwise, need to use inverse-transpose of world matrix.
     vout.NormalW = mul(vin.NormalL, (float3x3)gWorld);
@@ -51,6 +52,9 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
 	vout.TexC = mul(texC, matData.MatTransform).xy;
 
     vout.TangentW = mul(float4(vin.TangentL, 1.0), gWorld).xyz;
+
+    //vout.ShadowPosH = mul(posW, gShadowTransform[0]);
+
     return vout;
 }
 
@@ -68,6 +72,10 @@ float4 PS(VertexOut pin) : SV_Target
 	// Dynamically look up the texture in the array.
 	diffuseAlbedo *= gDiffuseMap[diffuseTexIndex].Sample(gsamLinearWrap, pin.TexC);
 	
+#ifdef ALPHA_TEST
+    clip(diffuseAlbedo.a - 0.1f);
+#endif
+
     // Interpolating normal can unnormalize it, so renormalize it.
     pin.NormalW = normalize(pin.NormalW);
     
@@ -81,22 +89,38 @@ float4 PS(VertexOut pin) : SV_Target
     }
 
     // Vector from point being lit to eye. 
-    float3 toEyeW = normalize(gEyePosW - pin.PosW);
+    float3 toEyeW = normalize(gEyePosW - pin.PosW.xyz);
 
     // vertex pos
-    float3 pos = pin.PosW;
+    float3 pos = pin.PosW.xyz;
 
     // Light terms.
     float4 ambient = gAmbientLight * diffuseAlbedo;
 
-    //const float shininess = 1.0f - roughness;
-    Material mat = { diffuseAlbedo, roughness, metalness, fresnelR0, 1.0f - roughness};
-    float3 shadowFactor = 1.0f;
+    float shininess = normalSample.a * (1 - roughness);
+
+    Material mat = { diffuseAlbedo, roughness, metalness, fresnelR0, shininess};
+    
+    float3 shadowFactor[3];
+    for(int i = 0; i < 3; i++)
+    {
+        float4 shadowPosH = mul(pin.PosW, gShadowTransform[i]);
+        shadowFactor[i] = CalcShadowFactor(i, shadowPosH);
+    }
+    
+    //float3 shadowFactor[NUM_DIR_LIGHTS + NUM_POINT_LIGHTS + NUM_SPOT_LIGHTS]; 
+    //for(int i = 0; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS + NUM_SPOT_LIGHTS; i++ )
+    //{
+    //    float4 shadowPosH = mul(float4(pin.PosW, 1.0f), gShadowTransforms[i]);
+    //    shadowFactor[i] = CalcShadowFactor(i, shadowPosH);
+    //}
+
+    // Blinning Phong
     //float4 directLight = ComputeLighting(gLights, mat, pin.PosW,
     //    normalT2W, toEyeW, shadowFactor);
 
     // 使用了normalmap解码到世界空间出来的法线
-    float4 directLight = PBRShading(gLights, mat, normalT2W, toEyeW, pos);
+    float4 directLight = PBRShading(gLights, mat, normalT2W, toEyeW, pos, shadowFactor);
     float4 litColor = ambient + directLight;
 
     // Add in specular reflections.
@@ -104,18 +128,15 @@ float4 PS(VertexOut pin) : SV_Target
     float4 reflectionColor = gCubeMap.Sample(gsamLinearWrap, r);
     float3 f0 = lerp(0.04, diffuseAlbedo.xyz, metalness);
     float nov = max(dot(normalT2W, toEyeW), 0.001f);
-    float shininess = normalSample.a * (1 - roughness);
-    //float3 FresnelFactor = fresnelR0 + (1.0f - fresnelR0) * pow(1 - nov, 5);
     float3 FresnelFactor = f0 + (1.0f - f0) * pow(1 - nov, 5);
-    //litColor.rgb = 0.0f;
-    litColor.rgb += shininess * FresnelFactor * reflectionColor;
-
-    // Common convention to take alpha from diffuse albedo.
+    
+    litColor.rgb += shininess * FresnelFactor * reflectionColor.xyz;
     litColor.a = diffuseAlbedo.a;
     //return reflectionColor;
     return litColor;
-    //return litColor;
-    //return float4(normalT2W, 1.0);
+    //return gShadowTransform[0][3];
+    //return float4(shadowFactor[0], 1.0f);
+    //return directLight;
 }
 
 

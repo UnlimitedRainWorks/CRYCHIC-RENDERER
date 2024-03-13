@@ -1,9 +1,3 @@
-//***************************************************************************************
-// LightingUtil.hlsl by Frank Luna (C) 2015 All Rights Reserved.
-//
-// Contains API for shader lighting.
-//***************************************************************************************
-
 #include "LightingUtil.hlsl"
 #define pi 3.1415926
 
@@ -78,7 +72,8 @@ float3 GetBRDF(float3 normal, float3 h, float3 v, float3 l, float3 diffuseAlbedo
 //---------------------------------------------------------------------------------------
 
 float4 PBRShading(Light gLights[MaxLights], Material mat,
-                  float3 normal, float3 v, float3 pos)
+                  float3 normal, float3 v, float3 pos,
+                  float3 shadowFactor[3])
 {
     float3 result = 0.0f;
 
@@ -96,11 +91,11 @@ float4 PBRShading(Light gLights[MaxLights], Material mat,
         float3 l = -gLights[i].Direction;
         float3 h = normalize(l + v);
         float3 BRDF = GetBRDF(normal, h, v, l, diffuseAlbedo, roughness, metalness);
-        float shadowFactor = 1.0f;
+        //float shadowFactor = 1.0f;
         float nol = max(dot(normal, l), 0.001);
         // 如果是选取光强最强的DirectLight作为该点在半球领域内接受的所有光，那么这里应该是irradiance
         float3 irradiance = gLights[i].Strength * nol;
-        result += shadowFactor * BRDF * irradiance;
+        result += shadowFactor[i] * BRDF * irradiance;
     }
 #endif
 
@@ -120,7 +115,7 @@ float4 PBRShading(Light gLights[MaxLights], Material mat,
         l /= d;
         float3 h = normalize(l + v);
         float3 BRDF = GetBRDF(normal, h, v, l, diffuseAlbedo, roughness, metalness);
-        float shadowFactor = 1.0f;
+        //float shadowFactor = 1.0f;
         float nol = max(dot(normal, l), 0.001);
         
         float3 lightStrength = gLights[i].Strength * nol;
@@ -128,8 +123,8 @@ float4 PBRShading(Light gLights[MaxLights], Material mat,
         // Attenuate light by distance.
         float att = CalcAttenuation(d, gLights[i].FalloffStart, gLights[i].FalloffEnd);
         lightStrength *= att;
-
-        result += shadowFactor * BRDF * lightStrength;
+        shadowFactor[i] *= att
+        result += shadowFactor[i] * BRDF * lightStrength;
     }
 #endif
 
@@ -155,15 +150,15 @@ float4 PBRShading(Light gLights[MaxLights], Material mat,
         }
         float3 h = normalize(l + v);
         float3 BRDF = GetBRDF(normal, h, v, l, diffuseAlbedo, roughness, metalness);
-        float shadowFactor = 1.0f;
+        //float shadowFactor = 1.0f;
         float nol = max(dot(normal, l), 0.001);
         float3 lightStrength = gLights[i].Strength * nol;
         // Attenuate light by distance.
         float att = CalcAttenuation(d, gLights[i].FalloffStart, gLights[i].FalloffEnd);
         att *= pow(max(dot(-l, gLights[i].Direction), 0.001f), gLights[i].SpotPower);
         lightStrength *= att;
-
-        result += shadowFactor * BRDF * lightStrength;
+        shadowFactor[i] *= att;
+        result += shadowFactor[i] * BRDF * lightStrength;
     }
 #endif
 
