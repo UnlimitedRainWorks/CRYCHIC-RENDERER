@@ -1,2 +1,0 @@
-# CRYCHIC-RENDERER
-dx12 toy

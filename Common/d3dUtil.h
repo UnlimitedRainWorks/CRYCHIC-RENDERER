@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <wrl.h>
 #include <dxgi1_4.h>
+#include <dxgi1_5.h>
 #include <d3d12.h>
 #include <D3Dcompiler.h>
 #include <DirectXMath.h>
@@ -115,13 +116,6 @@ public:
     static Microsoft::WRL::ComPtr<ID3DBlob> LoadBinary(const std::wstring& filename);
 
     static Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBuffer(
-        ID3D12Device* device,
-        ID3D12GraphicsCommandList* cmdList,
-        const void* initData,
-        UINT64 byteSize,
-        Microsoft::WRL::ComPtr<ID3D12Resource>& uploadBuffer);
-
-    static Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBufferUAV(
         ID3D12Device* device,
         ID3D12GraphicsCommandList* cmdList,
         const void* initData,
@@ -267,7 +261,6 @@ struct Material
 	DirectX::XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };
 	DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };
 	float Roughness = .25f;
-	float Metalness = .25f;
 	DirectX::XMFLOAT4X4 MatTransform = MathHelper::Identity4x4();
 };
 

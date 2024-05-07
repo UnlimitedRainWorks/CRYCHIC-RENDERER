@@ -1,42 +1,43 @@
-
 struct GBuffer
 {
-	float4 GBuffer0 : SV_TARGET0;
-	float4 GBuffer1 : SV_TARGET1;
-	float4 GBuffer2 : SV_TARGET2;
-	float4 GBuffer3 : SV_TARGET3;
+	float4 GBuffer0 : SV_Target0;
+	float4 GBuffer1 : SV_Target1;
+	float4 GBuffer2 : SV_Target2;
+	float4 GBuffer3 : SV_Target3;
 };
 
-struct PBRDesc
+struct GBufferDesc
 {
-    float3 pos;
+	float3 pos;
     float metalness;
     float3 albedo;
-    float roughness;
-    float4 normal;
+	float ao;
+    float3 normal;
+	float roughness;
 };
 
 //---------------------------------------------------------------------------------------
 // Transfer PBR information to GBuffer
 //---------------------------------------------------------------------------------------
-GBuffer EncodePBRToGBuffer(float3 pos,float metalness, 
-						   float3 albedo, float4 normal, float roughness)
+GBuffer EncodePBRToGBuffer(float3 pos, float metalness, float3 albedo, float roughness,
+						   float3 normal)
 {
 	GBuffer gout;
 	gout.GBuffer0 = float4(pos, metalness);
 	gout.GBuffer1 = float4(albedo, roughness);
-	gout.GBuffer2 = float4(normal);
+	gout.GBuffer2 = float4(normal, 1.0f);
 	gout.GBuffer3 = 0.0f;
 	return gout;
 }
 
-PBRDesc DecodeGBuffer(float4 gBuffer0, float4 gBuffer1, float4 gBuffer2, float4 gBuffer3)
+GBufferDesc DecodeGBuffer(float4 gBuffer0, float4 gBuffer1, float4 gBuffer2,
+						  float4 gBuffer3)
 {
-	PBRDesc pbrDesc;
-	pbrDesc.pos = gBuffer0.xyz;
-	pbrDesc.metalness = gBuffer0.w;
-	pbrDesc.albedo = gBuffer1.xyz;
-	pbrDesc.roughness = gBuffer1.w;
-	pbrDesc.normal = float4(normalize(gBuffer2.xyz), gBuffer2.w);
-	return pbrDesc;
+	GBufferDesc desc;
+	desc.pos = gBuffer0.xyz;
+	desc.metalness = gBuffer0.w;
+	desc.albedo = gBuffer1.xyz;
+	desc.roughness = gBuffer1.w;
+	desc.normal = normalize(gBuffer2.xyz);
+	return desc;
 }

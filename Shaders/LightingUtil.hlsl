@@ -16,21 +16,31 @@ struct Light
     float SpotPower;    // spot light only
 };
 
+struct PBRDesc
+{
+    float3 normal;
+    float3 pos;
+    float3 halfVec;
+    float3 lightDir;
+    float3 view;
+    float roughness;
+    float metalness;
+    float3 f0;
+    float3 diffuseAlbedo;
+    float hDotv;
+    float nDotl;
+    float nDotv;
+};
+
 struct Material
 {
     float4 DiffuseAlbedo;
+    float3 FresnelR0;
     float Roughness;
     float Metalness;
-    float3 FresnelR0;
     float Shininess;
 };
 
-//struct Material
-//{
-//    float3 DiffuseAlbedo;
-//    float Roughness;
-//    float Metalness;
-//};
 float CalcAttenuation(float d, float falloffStart, float falloffEnd)
 {
     // Linear falloff.
@@ -145,7 +155,7 @@ float3 ComputeSpotLight(Light L, Material mat, float3 pos, float3 normal, float3
 
 float4 ComputeLighting(Light gLights[MaxLights], Material mat,
                        float3 pos, float3 normal, float3 toEye,
-                       float3 shadowFactor)
+                       float3 shadowFactor[MaxLights])
 {
     float3 result = 0.0f;
 

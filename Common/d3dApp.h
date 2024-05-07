@@ -59,7 +59,7 @@ protected:
 	bool InitDirect3D();
 	void CreateCommandObjects();
     void CreateSwapChain();
-
+    void CheckTearingSupport();
 	void FlushCommandQueue();
 
 	ID3D12Resource* CurrentBackBuffer()const;
@@ -83,6 +83,7 @@ protected:
 	bool      mMaximized = false;  // is the application maximized?
 	bool      mResizing = false;   // are the resize bars being dragged?
     bool      mFullscreenState = false;// fullscreen enabled
+    bool      m_tearingSupport = false;// is tearing?
 
 	// Set true to use 4X MSAA (?.1.8).  The default is false.
     bool      m4xMsaaState = false;    // 4X MSAA enabled
@@ -122,7 +123,7 @@ protected:
 	D3D_DRIVER_TYPE md3dDriverType = D3D_DRIVER_TYPE_HARDWARE;
     DXGI_FORMAT mBackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
     DXGI_FORMAT mDepthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-	int mClientWidth = 1280;
-	int mClientHeight = 960;
+	int mClientWidth = 800;
+	int mClientHeight = 600;
 };
 

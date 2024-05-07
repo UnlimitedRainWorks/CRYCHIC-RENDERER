@@ -159,7 +159,7 @@ void D3DApp::OnResize()
 		SwapChainBufferCount, 
 		mClientWidth, mClientHeight, 
 		mBackBufferFormat, 
-		DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH));
+		m_tearingSupport ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH));
 
 	mCurrBackBuffer = 0;
  
@@ -522,13 +522,35 @@ void D3DApp::CreateSwapChain()
     sd.OutputWindow = mhMainWnd;
     sd.Windowed = true;
 	sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    //sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    sd.Flags = m_tearingSupport ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
 	// Note: Swap chain uses queue to perform flush.
     ThrowIfFailed(mdxgiFactory->CreateSwapChain(
 		mCommandQueue.Get(),
 		&sd, 
 		mSwapChain.GetAddressOf()));
+}
+
+void D3DApp::CheckTearingSupport()
+{
+	// Rather than create the 1.5 factory interface directly, we create the 1.4
+// interface and query for the 1.5 interface. This will enable the graphics
+// debugging tools which might not support the 1.5 factory interface.
+
+	ComPtr<IDXGIFactory4> factory4;
+	HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory4));
+	BOOL allowTearing = FALSE;
+	if (SUCCEEDED(hr))
+	{
+		ComPtr<IDXGIFactory5> factory5;
+		hr = factory4.As(&factory5);
+		if (SUCCEEDED(hr))
+		{
+			hr = factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing));
+		}
+	}
+	m_tearingSupport = SUCCEEDED(hr) && allowTearing;
 }
 
 void D3DApp::FlushCommandQueue()

@@ -51,7 +51,6 @@ public:
         DirectX::XMFLOAT3 Normal;
         DirectX::XMFLOAT3 TangentU;
         DirectX::XMFLOAT2 TexC;
-		float materialID;
 	};
 
 	struct MeshData

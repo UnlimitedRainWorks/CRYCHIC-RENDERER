@@ -1,166 +1,149 @@
 #include "LightingUtil.hlsl"
 #define pi 3.1415926
 
-//---------------------------------------------------------------------------------------
-// NDF
-//---------------------------------------------------------------------------------------
-float D_GGX_TR(float3 normal, float3 h, float roughness)
+float NDF_GGX(float3 normal, float3 halfVec, float a)
 {
-    float r2 = roughness * roughness;
-    float noh = max(dot(normal, h), 0.01);
-    float noh2 = noh * noh;
-    float temp = noh2 * (r2 - 1) + 1;
-    float bottom = pi * temp * temp;
-    return r2 * rcp(bottom);
+	float a2 = a * a;
+	float nDoth = max(dot(normal, halfVec), 0.001f);
+	float nDoth2 = nDoth * nDoth;
+
+	float top = a2;
+	float tmp = pow(nDoth2 * (a2 - 1) + 1, 2);
+	float bottom = pi * tmp;
+	return top * rcp(bottom);
 }
 
-//---------------------------------------------------------------------------------------
-// Geometry  Kdirect = (r + 1) * (r + 1) / 8;
-//---------------------------------------------------------------------------------------
-float GeometrySchlickGGX(float vecDotN, float k)
+float GeometrySchlickGGX(float nDotvec, float k)
 {
-    float bottom = vecDotN * (1 - k) + k;
-    return vecDotN * rcp(bottom);
+	float top = nDotvec;
+	float bottom = nDotvec * (1 - k) + k;
+	return top / bottom;
 }
 
-float GeometrySmith(float3 normal, float3 v, float3 l, float k)
+float GeometrySchlickGGX1(float nDotvec, float k)
 {
-    float nov = max(dot(normal, v), 0.01);
-    float nol = max(dot(normal, l), 0.01);
-    return GeometrySchlickGGX(nov, k) * GeometrySchlickGGX(nol, k);
+	float bottom = nDotvec * (1 - k) + k;
+	return rcp(bottom);
 }
 
-//---------------------------------------------------------------------------------------
-// Fresnel
-//---------------------------------------------------------------------------------------
-float3 Fresnel(float3 normal, float3 v, float3 f0)
+float GeometrySmith(PBRDesc pbrDesc)
 {
-    float nov = max(dot(normal, v), 0.01f);
-    return f0 + (1 - f0) * pow(1 - nov, 5);
+	float nDotv = pbrDesc.nDotv;
+	float nDotl = pbrDesc.nDotl;
+	float roughness = pbrDesc.roughness;
+	float k = 0.125 * (roughness + 1) * (roughness + 1); 
+	float ggx1 = GeometrySchlickGGX(nDotv, k);
+	float ggx2 = GeometrySchlickGGX(nDotl, k);
+	return ggx1 * ggx2;
 }
 
-//---------------------------------------------------------------------------------------
-// Diffuse and Specular BRDF
-//---------------------------------------------------------------------------------------
-
-float3 GetBRDF(float3 normal, float3 h, float3 v, float3 l, float3 diffuseAlbedo, float roughness, float metalness)
+float3 FresnelSchlick(float hDotv, float3 f0)
 {
-    float3 f0 = lerp(0.04, diffuseAlbedo, metalness);
-    float D = D_GGX_TR(normal, h, roughness);
-    float3 F = Fresnel(normal, v, f0);
-
-    // Kdirect = (roughness + 1) * (roughness + 1) / 8
-    // KIBL = roughness * roughness / 2;
-    float Kdirect = (roughness + 1) * (roughness + 1) / 8;
-    float G = GeometrySmith(normal, v, l, Kdirect);
-    float nov = max(dot(normal, v), 0.01);
-    float nol = max(dot(normal, l), 0.01);
-    float3 top = D * F * G;
-    float bottom = 4 * nov * nol;
-    float3 fcook_torrance = top * rcp(bottom);
-    // 直接光照中反射部分所占比率
-    float3 ks = F;
-    float3 flambert = diffuseAlbedo * rcp(pi);
-    // 金属部分没有漫反射
-    float3 kd = (1 - F) * (1 - metalness);
-    float3 BRDF = kd * flambert + ks * fcook_torrance;
-    return BRDF;
+	return f0 + (1.0f - f0) * pow(clamp(1.0f - hDotv, 0.0f, 1.0f), 5.0f);
 }
 
-//---------------------------------------------------------------------------------------
-// PBRShading
-//---------------------------------------------------------------------------------------
-
-float4 PBRShading(Light gLights[MaxLights], Material mat,
-                  float3 normal, float3 v, float3 pos,
-                  float3 shadowFactor[3])
+float3 GetBRDF(PBRDesc pbrDesc)
 {
-    float3 result = 0.0f;
+	float3 normal = pbrDesc.normal;
+	float3 pos = pbrDesc.pos;
+	float3 halfVec = pbrDesc.halfVec;
+	float3 lightDir = pbrDesc.lightDir;
+	float3 view = pbrDesc.view;
+	float3 diffuseAlbedo = pbrDesc.diffuseAlbedo;
+	float roughness = pbrDesc.roughness;
+	float metalness = pbrDesc.metalness;
+	float3 f0 = lerp(0.04, diffuseAlbedo, metalness);
+	float hDotv = pbrDesc.hDotv;
+	float nDotl = pbrDesc.nDotl;
+	float nDotv = pbrDesc.hDotv;
+	
+	float D = NDF_GGX(normal, halfVec, roughness);
+	float3 F = FresnelSchlick(nDotv, f0);
+	float G = GeometrySmith(pbrDesc);
+	float3 fs = 0.25 * D * G * F;
+	fs /= (nDotl * nDotv);
+	float3 fd = diffuseAlbedo * rcp(pi);
+	float3 ks = F;
+	float3 kd = (1.0f - F) * (1 - metalness);
+	float3 brdf = kd * fd + ks * fs;
+	return brdf;
+}
 
-    int i = 0;
+PBRDesc GetPBRDesc(Material mat, float3 normal, float3 view, float3 lightDir, float3 pos)
+{
+	PBRDesc pbrDesc;
+	pbrDesc.normal = normal;
+	pbrDesc.pos = pos;
+	pbrDesc.view = view;
+	float3 halfVec = normalize(view + lightDir);
+	pbrDesc.halfVec = halfVec;
+	pbrDesc.lightDir = lightDir;
+	pbrDesc.roughness = mat.Roughness;
+	pbrDesc.metalness = mat.Metalness;
+	pbrDesc.diffuseAlbedo = mat.DiffuseAlbedo.xyz;
+	pbrDesc.hDotv = max(dot(halfVec, view), 0.001f);
+	pbrDesc.nDotl = max(dot(normal, lightDir), 0.001f);
+	pbrDesc.nDotv = max(dot(normal, view), 0.001f);
+	return pbrDesc;
+}
+
+
+float4 PBRShading(Light gLights[MaxLights], Material mat, float3 normal, float3 v, float3 pos,
+					float3 shadowFactor[MaxLights])
+{
+	float3 result = 0.0f;
+	int i = 0;
 
 #if (NUM_DIR_LIGHTS > 0)
-    for(i = 0; i < NUM_DIR_LIGHTS; ++i)
+	
+	for(i = 0; i < NUM_DIR_LIGHTS; ++i)
     {
-        float3 diffuseAlbedo = mat.DiffuseAlbedo.xyz;
-        float roughness = pow(mat.Roughness, 2.0);
-        //float roughness = mat.Roughness;
-        float metalness = mat.Metalness;
-
-        // Directional Lights' directions should be reversed.
-        float3 l = -gLights[i].Direction;
-        float3 h = normalize(l + v);
-        float3 BRDF = GetBRDF(normal, h, v, l, diffuseAlbedo, roughness, metalness);
-        //float shadowFactor = 1.0f;
-        float nol = max(dot(normal, l), 0.001);
-        // 如果是选取光强最强的DirectLight作为该点在半球领域内接受的所有光，那么这里应该是irradiance
-        float3 irradiance = gLights[i].Strength * nol;
-        result += shadowFactor[i] * BRDF * irradiance;
-    }
+		PBRDesc pbrDesc = GetPBRDesc(mat, normal, v, -gLights[i].Direction, pos);
+		float3 brdf = GetBRDF(pbrDesc);
+		float nDotl = pbrDesc.nDotl;
+		float3 irradiance = gLights[i].Strength * nDotl;
+		result += pow(shadowFactor[i], 5.0f) * brdf * irradiance;
+	}
 #endif
-
+	
 #if (NUM_POINT_LIGHTS > 0)
-    for(i = NUM_DIR_LIGHTS; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS; ++i)
-    {
-        float3 diffuseAlbedo = mat.DiffuseAlbedo.xyz;
-        float roughness = pow(mat.Roughness, 2.0);
-        //float roughness = mat.Roughness;
-        float metalness = mat.Metalness;
+	for(i = NUM_DIR_LIGHTS; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS; ++i)
+	{
+		float3 l = gLights[i].Position - pos;
+		float d = length(l);
+		l /= d;
+		PBRDesc pbrDesc = GetPBRDesc(mat, normal, v, l, pos);
+		float3 brdf = GetBRDF(pbrDesc);
+		float nDotl = pbr.nDotl;
+		float3 lightStrength = gLights[i].Strength * nDotl;
+		float att = CalcAttenuation(d, gLights[i].FalloffStart, gLights[i].FalloffEnd);
+		lightStrength *= att;
 
-        // Point Lights' directions should be ToEyeW(v).
-        float3 l = gLights[i].Position - pos;
-        float d = length(l);
-        
-        // lightVec normalize
-        l /= d;
-        float3 h = normalize(l + v);
-        float3 BRDF = GetBRDF(normal, h, v, l, diffuseAlbedo, roughness, metalness);
-        //float shadowFactor = 1.0f;
-        float nol = max(dot(normal, l), 0.001);
-        
-        float3 lightStrength = gLights[i].Strength * nol;
-
-        // Attenuate light by distance.
-        float att = CalcAttenuation(d, gLights[i].FalloffStart, gLights[i].FalloffEnd);
-        lightStrength *= att;
-        shadowFactor[i] *= att
-        result += shadowFactor[i] * BRDF * lightStrength;
-    }
+		//result += shadowFactor[i] * brdf * lightStrength;
+	}
 #endif
 
 #if (NUM_SPOT_LIGHTS > 0)
     for(i = NUM_DIR_LIGHTS + NUM_POINT_LIGHTS; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS + NUM_SPOT_LIGHTS; ++i)
-    {
-        float3 diffuseAlbedo = mat.DiffuseAlbedo.xyz;
-        float roughness = pow(mat.Roughness, 2.0);
-        //float roughness = mat.Roughness;
-        float metalness = mat.Metalness;
-
-        // Spot Lights' directions should be reversed.
-        float3 spotDirection = -gLights[i].Direction;
-        float3 l = gLights[i].Position - pos;
-        float d = length(l);
-
-        // lightVec normalize
-        l /= d;
-        if(d > gLights[i].FalloffEnd) 
-        {
-            result += 0.0f;
-            continue;
-        }
-        float3 h = normalize(l + v);
-        float3 BRDF = GetBRDF(normal, h, v, l, diffuseAlbedo, roughness, metalness);
-        //float shadowFactor = 1.0f;
-        float nol = max(dot(normal, l), 0.001);
-        float3 lightStrength = gLights[i].Strength * nol;
-        // Attenuate light by distance.
-        float att = CalcAttenuation(d, gLights[i].FalloffStart, gLights[i].FalloffEnd);
-        att *= pow(max(dot(-l, gLights[i].Direction), 0.001f), gLights[i].SpotPower);
-        lightStrength *= att;
-        shadowFactor[i] *= att;
-        result += shadowFactor[i] * BRDF * lightStrength;
-    }
+	{
+		float3 spotDirection = -gLights[i].Direction;
+		float3 l = gLights[i].Position - pos;
+		float d = length(l);
+		l /= d;
+		if (d > gLights[i].FalloffEnd)
+		{
+			result += 0.0f;
+			continue;
+		}
+		PBRDesc pbrDesc = GetPBRDesc(mat, normal, v, l, pos);
+		float3 brdf = GetBRDF(pbrDesc);
+		float nDotl = pbrDesc.nDotl;
+		float3 lightStrength = gLights[i].Strength * nDotl;
+		float att = CalcAttenuation(d, gLights[i].FalloffStart, gLights[i].FalloffEnd);
+		att *= pow(max(dot(spotDirection, l), 0.001f), gLights[i].SpotPower);
+		lightStrength *= att;
+		//result += shadowFactor[i] * brdf * lightStrength;
+	}
 #endif
-
-    return float4(result, 0.0f);
+	return float4(result, 0.0f);
 }
